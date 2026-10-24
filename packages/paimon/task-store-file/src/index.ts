@@ -59,18 +59,28 @@ export class FileTaskStore implements TaskStore {
   private readonly tasks = new Map<string, Task>()
   private readonly runs = new Map<string, Run>()
   private readonly events: TaskEvent[] = []
+  private readonly problemList: string[] = []
 
   constructor(options: FileTaskStoreOptions) {
     this.directory = options.directory
     mkdirSync(this.directory, { recursive: true })
-    this.loadTasks()
-    this.loadRuns()
-    this.loadEvents()
+    this.load()
   }
 
   /** Absolute directory this store owns. */
   get location(): string {
     return this.directory
+  }
+
+  /**
+   * Files that could not be read and were quarantined instead.
+   *
+   * Exposed rather than logged so the caller decides how loud to be: a boot
+   * that silently discarded history would be worse than a noisy one, and this
+   * module has no logger to be noisy with.
+   */
+  get problems(): readonly string[] {
+    return this.problemList
   }
 
   saveTask(task: Task): void {
@@ -120,17 +130,52 @@ export class FileTaskStore implements TaskStore {
    *
    * Written to a sibling temp file and renamed over the target, so a crash
    * mid-write leaves the previous snapshot intact instead of a half-written
-   * document that would make the whole history unreadable.
+   * document that would make the whole history unreadable. The temp name
+   * carries the pid so two processes sharing a home cannot write into the same
+   * scratch file and hand each other a torn result.
    */
   private writeSnapshot(name: string, items: Map<string, Task | Run>): void {
     const target = join(this.directory, name)
-    const temporary = `${target}.tmp`
+    const temporary = `${target}.${process.pid}.tmp`
     const snapshot: Snapshot<Task | Run> = {
       version: FORMAT_VERSION,
       items: Object.fromEntries(items),
     }
     writeFileSync(temporary, `${JSON.stringify(snapshot, null, 2)}\n`, 'utf8')
     renameSync(temporary, target)
+  }
+
+  /**
+   * Loads the three files, quarantining any that cannot be read.
+   *
+   * Unreadable history must not be fatal: task records describe past work,
+   * while the harness is the product, and a store that refuses to construct
+   * takes the whole agent down with it. The damaged file is renamed with a
+   * `.corrupt` suffix and left in place, so the data is still there to inspect
+   * and the reason is reported through {@link problems}.
+   */
+  private load(): void {
+    this.attempt(TASKS_FILE, () => this.loadTasks(), () => this.tasks.clear())
+    this.attempt(RUNS_FILE, () => this.loadRuns(), () => this.runs.clear())
+    this.attempt(EVENTS_FILE, () => this.loadEvents(), () => { this.events.length = 0 })
+  }
+
+  private attempt(name: string, load: () => void, reset: () => void): void {
+    try {
+      load()
+    } catch (error) {
+      reset()
+      const path = join(this.directory, name)
+      const quarantined = `${path}.corrupt`
+      let detail = ''
+      try {
+        renameSync(path, quarantined)
+        detail = ` (moved to ${quarantined})`
+      } catch {
+        // A file that cannot be moved is still skipped rather than fatal.
+      }
+      this.problemList.push(`${name} could not be read${detail}: ${messageOf(error)}`)
+    }
   }
 
   private loadTasks(): void {
@@ -184,4 +229,8 @@ export class FileTaskStore implements TaskStore {
       }
     })
   }
+}
+
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }

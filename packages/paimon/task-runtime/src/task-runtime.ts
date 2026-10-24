@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { isAbsolute, resolve } from 'node:path'
 import { type Clock, systemClock, toIso } from './clock.ts'
 import { ApprovalPendingError, TaskClosedError, TaskNotFoundError, taskError } from './errors.ts'
 import { redactRecord } from './redaction.ts'
@@ -17,8 +18,9 @@ import {
   type TaskResult,
   type TerminalStatus,
   type ValidationReport,
+  type ValidationRuleSpec,
 } from './types.ts'
-import { ResultValidator, type ValidationRule } from './validator.ts'
+import { ResultValidator, ruleFromSpec, type ValidationRule } from './validator.ts'
 import { checkWithinWorkspace } from './workspace.ts'
 
 /** Construction options for a {@link TaskRuntime}. */
@@ -42,6 +44,14 @@ export interface CreateTaskInput {
   readonly retryPolicy?: RetryPolicy | undefined
   /** Completion conditions. An empty list can never validate. */
   readonly rules?: readonly ValidationRule[] | undefined
+  /**
+   * The same conditions as data.
+   *
+   * Supply this whenever the task may outlive the process: only specs can be
+   * persisted, so a task created with closures alone becomes unverifiable the
+   * moment it is reloaded.
+   */
+  readonly ruleSpecs?: readonly ValidationRuleSpec[] | undefined
 }
 
 /** A tool call the agent wants to perform, submitted for gating. */
@@ -149,8 +159,14 @@ export class TaskRuntime {
       currentRunId: undefined,
       runIds: [],
       finalResult: undefined,
+      ruleSpecs: input.ruleSpecs ?? [],
+      ...input.retryPolicy === undefined ? {} : { retryPolicy: input.retryPolicy },
     }
-    this.#rules.set(task.id, input.rules ?? [])
+    // Registered only when closures were actually supplied: an empty live set
+    // would shadow the specs and make a task created from data unverifiable.
+    if (input.rules !== undefined) {
+      this.#rules.set(task.id, input.rules)
+    }
     if (input.retryPolicy !== undefined) {
       this.#policies.set(task.id, input.retryPolicy)
     }
@@ -272,7 +288,12 @@ export class TaskRuntime {
       return { kind: 'timed-out', reason: 'the task deadline passed before this call started' }
     }
     if (request.path !== undefined && task.workspace !== undefined) {
-      const boundary = checkWithinWorkspace(task.workspace, request.path)
+      // A relative path is relative to the workspace, not to whatever directory
+      // the harness process happens to run in: resolving against the CWD would
+      // check a boundary the model never meant to cross, and `resolve()` would
+      // otherwise silently point outside the workspace.
+      const candidate = isAbsolute(request.path) ? request.path : resolve(task.workspace, request.path)
+      const boundary = checkWithinWorkspace(task.workspace, candidate)
       if (boundary.kind === 'deny') {
         return this.#deny(task, request, boundary.reason)
       }
@@ -343,7 +364,7 @@ export class TaskRuntime {
   checkCompletion(taskId: string, evidence: readonly Evidence[]): ValidationReport {
     const task = this.#requireTask(taskId)
     if (task.status === 'WAITING_APPROVAL') throw new ApprovalPendingError(task.id)
-    return new ResultValidator(this.#rules.get(task.id) ?? []).validate(evidence)
+    return new ResultValidator(this.#rulesFor(task)).validate(evidence)
   }
 
   /**
@@ -355,8 +376,25 @@ export class TaskRuntime {
    */
   completeRun(taskId: string, evidence: readonly Evidence[], summary: string): SettleOutcome {
     const task = this.#requireTask(taskId)
+    // The deadline is checked here as well as at every gate: work can finish
+    // *after* the budget is spent, and settling that as success would let a task
+    // buy its own way out of the limit it was given.
+    if (this.#deadlineExceeded(task)) {
+      const report = new ResultValidator(this.#rulesFor(task)).validate(evidence)
+      const lastRunId = task.runIds.at(-1)
+      this.#expire(task)
+      const expired = lastRunId === undefined ? undefined : this.#store.getRun(lastRunId)
+      if (expired === undefined) throw new TaskClosedError(task.id, task.status)
+      return {
+        kind: 'failed',
+        task,
+        run: expired,
+        report,
+        reason: 'the task deadline passed before this attempt settled',
+      }
+    }
     const run = this.#requireActiveRun(task)
-    const report = new ResultValidator(this.#rules.get(task.id) ?? []).validate(evidence)
+    const report = new ResultValidator(this.#rulesFor(task)).validate(evidence)
     this.#record(task, 'validation/completed', {
       satisfied: report.satisfied,
       checks: report.checks.map(check => ({
@@ -398,7 +436,7 @@ export class TaskRuntime {
       ? 'CANCELLED'
       : error.kind === 'timeout' ? 'TIMED_OUT' : 'FAILED'
     const finishedRun = this.#finishRun(run, runStatus, error, summary ?? error.message)
-    const report = new ResultValidator(this.#rules.get(task.id) ?? []).validate([])
+    const report = new ResultValidator(this.#rulesFor(task)).validate([])
     const settled = this.#applyRetry(task, finishedRun, report, error, summary ?? error.message)
     return {
       task: settled.task,
@@ -471,7 +509,52 @@ export class TaskRuntime {
     return true
   }
 
+  /**
+   * Closes a task nobody is going to finish, as `FAILED`.
+   *
+   * A cancellation needs someone still driving the work and a deadline needs a
+   * budget; a task that has neither (no `deadlineMs`, or one restored from disk
+   * by a process that no longer holds the agent that created it) would sit in
+   * `RUNNING` forever and accumulate as a zombie. Abandoning is an explicit,
+   * recorded act instead of a timeout, so the timeline says who gave up and why.
+   *
+   * Idempotent against a finished task: a late abandon is a no-op, not an error.
+   */
+  abandon(taskId: string, reason: string): Task {
+    const task = this.#requireTask(taskId)
+    if (isTerminalTaskStatus(task.status)) return task
+    this.#record(task, 'task/abandoned', { reason, status: task.status })
+    const error = taskError('abandoned', reason)
+    if (task.currentRunId !== undefined) {
+      const run = this.#store.getRun(task.currentRunId)
+      if (run !== undefined && run.status === 'RUNNING') {
+        this.#finishRun(run, 'FAILED', error, reason)
+        this.#record(task, 'run/ended', { attempt: run.attempt, status: 'FAILED', reason }, run.id)
+      }
+    }
+    return this.#finishTask(task, 'FAILED', reason, undefined)
+  }
+
   // ------------------------------------------------------------------ private
+
+  /**
+   * Completion rules for a task: the live set if this process registered one,
+   * otherwise the specs persisted with the task.
+   *
+   * The fallback is what keeps a restarted task verifiable. It is a fallback
+   * rather than the only source because a caller may legitimately hand over a
+   * closure a spec cannot express.
+   */
+  #rulesFor(task: Task): readonly ValidationRule[] {
+    const live = this.#rules.get(task.id)
+    if (live !== undefined) return live
+    return (task.ruleSpecs ?? []).map(ruleFromSpec)
+  }
+
+  /** Retry policy for a task: live override, then the task's own, then the default. */
+  #policyFor(task: Task): RetryPolicy {
+    return this.#policies.get(task.id) ?? task.retryPolicy ?? this.#retryPolicy
+  }
 
   #applyRetry(
     task: Task,
@@ -496,7 +579,7 @@ export class TaskRuntime {
       error,
       cancelled: task.cancelRequestedAt !== undefined,
       deadlineExceeded: this.#deadlineExceeded(task),
-      policy: this.#policies.get(task.id) ?? this.#retryPolicy,
+      policy: this.#policyFor(task),
     })
     this.#record(task, 'run/ended', { attempt: run.attempt, status: run.status, retry: decision.kind }, run.id)
 

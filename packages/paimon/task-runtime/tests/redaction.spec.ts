@@ -40,6 +40,24 @@ describe('redaction', () => {
     expect(output).toEqual({ command: `curl -H "x-key: ${REDACTED}"` })
   })
 
+  it('recognises camelCase spellings of secret names', () => {
+    // JSON payloads arrive camelCased, and a substring match on the original
+    // pattern missed exactly the spellings a leaked token actually uses.
+    for (const key of ['accessToken', 'clientSecret', 'refresh_token', 'sessionId', 'privateKey']) {
+      expect(isSecretKey(key), key).toBe(true)
+    }
+  })
+
+  it('leaves a shared reference readable instead of calling it a cycle', () => {
+    // One object in two slots is a shared reference, not a cycle; masking the
+    // second copy would hide data for no safety gain.
+    const shared = { name: 'same' }
+    expect(redact({ first: shared, second: shared })).toEqual({
+      first: { name: 'same' },
+      second: { name: 'same' },
+    })
+  })
+
   it('does not throw on a cyclic structure', () => {
     const cyclic: Record<string, unknown> = { name: 'root' }
     cyclic.self = cyclic

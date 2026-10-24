@@ -87,6 +87,17 @@ export interface Task {
   currentRunId: string | undefined
   readonly runIds: string[]
   finalResult: TaskResult | undefined
+  /**
+   * Completion conditions in serialisable form.
+   *
+   * A `ValidationRule` carries a closure and cannot cross a process boundary,
+   * but a task restored from disk still has to be verifiable. The specs travel
+   * with the task and are turned back into rules on demand; a live rule set
+   * registered in this process always wins over them.
+   */
+  readonly ruleSpecs?: readonly ValidationRuleSpec[]
+  /** Retry policy captured at creation, for the same reason as `ruleSpecs`. */
+  readonly retryPolicy?: RetryPolicy
 }
 
 /** One execution attempt inside a task. */
@@ -119,7 +130,55 @@ export type TaskErrorKind =
   | 'permission'
   | 'timeout'
   | 'cancelled'
+  /** Nobody is going to finish this goal; recorded rather than inferred. */
+  | 'abandoned'
   | 'internal'
+
+/**
+ * How many attempts a task may spend and which failures justify another one.
+ *
+ * Lives here rather than in `retry-policy.ts` because a task carries its own
+ * copy, so the shape has to survive serialisation alongside the rest of the
+ * aggregate.
+ */
+export interface RetryPolicy {
+  readonly maxAttempts: number
+  readonly retryableKinds: readonly TaskErrorKind[]
+}
+
+/**
+ * Serialisable form of one completion condition.
+ *
+ * The rule factories build closures; these specs are the same conditions as
+ * data, so they can be stored with the task and rebuilt after a restart. Every
+ * spec kind has a matching factory in `validator.ts`.
+ */
+export type ValidationRuleSpec =
+  | {
+    readonly kind: 'test-report'
+    readonly id: string
+    readonly description: string
+    readonly ref?: string
+  }
+  | {
+    readonly kind: 'command-exit'
+    readonly id: string
+    readonly description: string
+    readonly commandRef: string
+    readonly expectExitCode?: number
+  }
+  | {
+    readonly kind: 'file-state'
+    readonly id: string
+    readonly description: string
+    readonly path: string
+    readonly expectPresent?: boolean
+  }
+  | {
+    readonly kind: 'any-tool-success'
+    readonly id: string
+    readonly description: string
+  }
 
 /** The report attached to a finished task. */
 export interface TaskResult {
@@ -179,6 +238,7 @@ export const TASK_EVENT_TYPES = [
   'task/status-changed',
   'task/cancel-requested',
   'task/cancel-acknowledged',
+  'task/abandoned',
   'run/started',
   'run/ended',
   'tool/requested',

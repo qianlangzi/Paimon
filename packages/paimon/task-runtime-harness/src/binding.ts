@@ -159,6 +159,27 @@ export class TaskBindings {
   }
 
   /**
+   * Drops every association pointing at a task, without touching the task.
+   *
+   * Used after a task is closed by something other than the agent that owns
+   * it — an abandon from another session, for instance — so the agent is not
+   * left bound to a finished task it can no longer influence.
+   *
+   * @returns how many associations were removed.
+   */
+  forget(taskId: string): number {
+    let removed = 0
+    for (const [agentId, boundTaskId] of this.#taskByAgent) {
+      if (boundTaskId === taskId) {
+        this.#taskByAgent.delete(agentId)
+        removed += 1
+      }
+    }
+    this.#evidenceByTask.delete(taskId)
+    return removed
+  }
+
+  /**
    * Drops the association.
    *
    * @returns whether a binding existed. The task itself is left alone: a

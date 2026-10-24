@@ -23,7 +23,9 @@ import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import {
   TaskRuntime,
   type CreateTaskInput,
+  type Run,
   type Task,
+  type TaskEvent,
 } from '@deepseek-ai/dsh-paimon-task-runtime'
 import { FileTaskStore } from '@deepseek-ai/dsh-paimon-task-store-file'
 import type { PreToolDecision, ToolExecution, ToolExecutionResult } from '@deepseek-ai/dsh-tools'
@@ -80,12 +82,28 @@ export interface Config {
   readonly knownSecrets?: string[]
 }
 
+/**
+ * Everything a task detail surface needs, assembled in one call.
+ *
+ * The status tool asks the same three questions in a different order and for a
+ * different reader; a desktop view needs the whole aggregate at once, and doing
+ * that in the adapter keeps the view from depending on the runtime's shape.
+ */
+export interface TaskDetail {
+  readonly task: Task
+  readonly runs: readonly Run[]
+  /** Oldest first, so a timeline can be rendered without reversing it. */
+  readonly events: readonly TaskEvent[]
+}
+
 /** What a caller supplies when binding a task to an agent. */
 export interface BindInput {
   readonly goal: string
   readonly workspace?: string | undefined
   readonly deadlineMs?: number | undefined
   readonly rules?: CreateTaskInput['rules']
+  /** The same conditions as data, so the task stays verifiable after a restart. */
+  readonly ruleSpecs?: CreateTaskInput['ruleSpecs']
   readonly retryPolicy?: CreateTaskInput['retryPolicy']
 }
 
@@ -114,14 +132,14 @@ export class PaimonTaskService extends Service {
   // survives the proxy, which is why every service in this repository uses it.
   private readonly taskBindings: TaskBindings
   private readonly approvalTools: ReadonlySet<string>
-  private readonly testTools: ReadonlySet<string>
+  private readonly testToolNames: ReadonlySet<string>
   private readonly pathKeys: readonly string[]
   private readonly defaultDeadlineMs: number
 
   constructor(ctx: Context, config: Config = {}) {
     super(ctx, 'paimonTasks')
     this.approvalTools = new Set(config.approvalTools ?? [])
-    this.testTools = new Set(config.testTools ?? [])
+    this.testToolNames = new Set(config.testTools ?? [])
     this.pathKeys = config.pathArgumentKeys ?? DEFAULT_PATH_ARGUMENT_KEYS
     this.defaultDeadlineMs = config.deadlineMs ?? 0
     const store = config.persist === true
@@ -144,6 +162,17 @@ export class PaimonTaskService extends Service {
   /** The agent-to-task associations this adapter manages. */
   get bindings(): TaskBindings {
     return this.taskBindings
+  }
+
+  /**
+   * Tool names whose success counts as "the tests passed".
+   *
+   * Read by the model-facing tools so a completion policy can be chosen from
+   * what this deployment can actually verify, rather than from what the PRD
+   * would like it to verify.
+   */
+  get testTools(): readonly string[] {
+    return [...this.testToolNames]
   }
 
   /**
@@ -184,6 +213,50 @@ export class PaimonTaskService extends Service {
     agent.cancel({ kind: 'user' })
     await agent.whenIdle()
     return this.taskBindings.acknowledgeCancel(agent)
+  }
+
+  /**
+   * Closes a task that nobody will finish, and drops the association with it.
+   *
+   * Distinct from {@link cancel}: cancelling means "stop what is running",
+   * which needs a live agent to wind down. Abandoning means "this goal is
+   * dropped", which is the only way to close a task a previous process left in
+   * `RUNNING` — there is no agent left to cancel and, without a deadline, no
+   * timer to expire it either.
+   */
+  abandon(taskId: string, reason: string): Task {
+    const task = this.taskBindings.runtime.abandon(taskId, reason)
+    this.taskBindings.forget(taskId)
+    return task
+  }
+
+  /**
+   * Every recorded task, oldest first.
+   *
+   * The first read model the desktop surfaces need: a task list is the entry
+   * point for the detail, approval and diagnostics views, and it has to work
+   * for tasks this process did not create (persisted history) as well as live
+   * ones.
+   */
+  listTasks(): readonly Task[] {
+    return this.runtime.listTasks()
+  }
+
+  /**
+   * One task with its runs and timeline.
+   *
+   * @param eventLimit - Keep only the most recent N events. A long task can
+   * accumulate thousands and a view that asks for the tail should not pay for
+   * the whole log.
+   */
+  taskDetail(taskId: string, eventLimit?: number): TaskDetail {
+    const task = this.runtime.getTask(taskId)
+    const events = this.runtime.getEvents(taskId)
+    return {
+      task,
+      runs: this.runtime.listRuns(taskId),
+      events: eventLimit === undefined ? events : events.slice(-Math.max(0, eventLimit)),
+    }
   }
 
   private async gateCall(
@@ -237,7 +310,7 @@ export class PaimonTaskService extends Service {
       callId: exec.callId,
       toolName: exec.name,
       result,
-      testTools: [...this.testTools],
+      testTools: [...this.testToolNames],
     })
   }
 }

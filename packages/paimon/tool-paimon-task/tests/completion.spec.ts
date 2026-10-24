@@ -7,6 +7,7 @@ import {
   COMPLETION_MODES,
   DEFAULT_COMPLETION_MODE,
   completionRules,
+  completionRuleSpecs,
 } from '../src/completion.ts'
 
 const passingTest: Evidence = {
@@ -41,20 +42,36 @@ const modelClaim: Evidence = {
   detail: 'all done',
 }
 
-function validate(mode: 'tests' | 'tool-success', evidence: readonly Evidence[]) {
-  return new ResultValidator(completionRules(mode)).validate(evidence)
+function validate(mode: 'auto' | 'tests' | 'tool-success', evidence: readonly Evidence[], hasTestTools = true) {
+  return new ResultValidator(completionRules(mode, { hasTestTools })).validate(evidence)
 }
 
 describe('completion modes', () => {
-  it('offers exactly two modes and defaults to the stricter one', () => {
-    expect(COMPLETION_MODES).toEqual(['tests', 'tool-success'])
-    expect(DEFAULT_COMPLETION_MODE).toBe('tests')
+  it('offers auto plus the two explicit policies, and defaults to auto', () => {
+    expect(COMPLETION_MODES).toEqual(['auto', 'tests', 'tool-success'])
+    expect(DEFAULT_COMPLETION_MODE).toBe('auto')
   })
 
   it('always produces at least one rule, so a task is never unverifiable', () => {
     for (const mode of COMPLETION_MODES) {
-      expect(completionRules(mode).length).toBeGreaterThan(0)
+      expect(completionRules(mode, { hasTestTools: true }).length).toBeGreaterThan(0)
+      expect(completionRules(mode, { hasTestTools: false }).length).toBeGreaterThan(0)
     }
+  })
+})
+
+describe('the auto mode', () => {
+  it('verifies against tests when the deployment declares a test runner', () => {
+    expect(completionRuleSpecs('auto', { hasTestTools: true }).map(spec => spec.kind)).toEqual(['test-report'])
+    expect(validate('auto', [passingTest]).satisfied).toBe(true)
+  })
+
+  it('falls back to tool success when no test runner is declared', () => {
+    // The shipped profile declares no test tool, so `tests` could never be
+    // satisfied there: the old default silently made every task unfinishable.
+    expect(completionRuleSpecs('auto', { hasTestTools: false }).map(spec => spec.kind)).toEqual(['any-tool-success'])
+    expect(validate('auto', [successfulTool], false).satisfied).toBe(true)
+    expect(validate('auto', [passingTest], false).satisfied).toBe(false)
   })
 })
 

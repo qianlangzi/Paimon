@@ -4,11 +4,28 @@ export const REDACTED = '[REDACTED]'
 /**
  * Field names whose values are treated as secrets.
  *
- * Matched case-insensitively against the *key*, not the value, because a value
- * pattern alone cannot distinguish a key from ordinary prose.
+ * Matched against the *key*, not the value, because a value pattern alone
+ * cannot distinguish a key from ordinary prose. The key is split into words
+ * first, so `accessToken`, `access_token` and `ACCESS_TOKEN` all reach the same
+ * decision — a plain substring match missed the camelCase spellings that JSON
+ * payloads actually use, which is precisely where a leaked token arrives from.
  */
-const SECRET_KEY_PATTERN =
-  /(?:^|[^a-z])(?:api[-_]?key|apikey|secret|token|password|passwd|credential|authorization|cookie|session[-_]?id)(?:$|[^a-z])/i
+const SECRET_WORDS = new Set([
+  'apikey',
+  'secret',
+  'token',
+  'password',
+  'passwd',
+  'credential',
+  'credentials',
+  'authorization',
+  'cookie',
+  'credentialsfile',
+  'sessionid',
+])
+
+/** Two-word combinations that name a secret without either word doing so. */
+const SECRET_PAIRS = new Set(['api|key', 'session|id', 'private|key'])
 
 /** Guards against pathological or cyclic structures during traversal. */
 const MAX_DEPTH = 12
@@ -45,7 +62,28 @@ export function redactRecord(
 
 /** Whether a field name denotes a secret. */
 export function isSecretKey(key: string): boolean {
-  return SECRET_KEY_PATTERN.test(key)
+  const words = wordsOf(key)
+  for (let index = 0; index < words.length; index += 1) {
+    const word = words[index]
+    if (word === undefined) continue
+    if (SECRET_WORDS.has(word)) return true
+    const next = words[index + 1]
+    if (next !== undefined && SECRET_PAIRS.has(`${word}|${next}`)) return true
+  }
+  return false
+}
+
+/**
+ * Splits a key into lowercase words on separators and camel humps.
+ *
+ * `accessToken` -> `['access', 'token']`, `API_KEY` -> `['api', 'key']`.
+ */
+function wordsOf(key: string): string[] {
+  return key
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .split(/[^A-Za-z0-9]+/)
+    .map(word => word.toLowerCase())
+    .filter(word => word.length > 0)
 }
 
 /** Replaces every occurrence of a known secret inside free text. */
@@ -67,16 +105,22 @@ function walk(
   if (typeof value === 'string') return scrubText(value, secrets)
   if (value === null || typeof value !== 'object') return value
   if (depth >= MAX_DEPTH) return '[TRUNCATED]'
+  // `seen` holds the objects on the *current* path, not every object ever
+  // visited: the same sub-object appearing twice in a payload is a shared
+  // reference, not a cycle, and calling it one would hide the second value.
   if (seen.has(value)) return '[CYCLE]'
   seen.add(value)
+  try {
+    if (Array.isArray(value)) {
+      return value.map(item => walk(item, secrets, depth + 1, seen))
+    }
 
-  if (Array.isArray(value)) {
-    return value.map(item => walk(item, secrets, depth + 1, seen))
+    const output: Record<string, unknown> = {}
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+      output[key] = isSecretKey(key) ? REDACTED : walk(entry, secrets, depth + 1, seen)
+    }
+    return output
+  } finally {
+    seen.delete(value)
   }
-
-  const output: Record<string, unknown> = {}
-  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
-    output[key] = isSecretKey(key) ? REDACTED : walk(entry, secrets, depth + 1, seen)
-  }
-  return output
 }

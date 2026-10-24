@@ -89,6 +89,7 @@ export {
   type TerminalStatus,
   type ValidationCheck,
   type ValidationReport,
+  type ValidationRuleSpec,
   isTerminalRunStatus,
   isTerminalTaskStatus,
   outcomeOf,
@@ -103,6 +104,7 @@ export {
   customRule,
   fileStateRule,
   isAuthoritative,
+  ruleFromSpec,
   testReportRule,
 } from './validator.ts'
 

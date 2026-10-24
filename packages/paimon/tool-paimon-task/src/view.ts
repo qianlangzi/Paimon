@@ -65,6 +65,52 @@ export function reportSummary(report: ValidationReport): ReportSummary {
   }
 }
 
+/** One row of the task listing. */
+export interface TaskRow {
+  readonly taskId: string
+  readonly goal: string
+  readonly status: string
+  readonly attempt: number
+  readonly createdAt: string
+  readonly updatedAt: string
+  readonly outcome?: string
+}
+
+/** Builds one listing row. */
+export function taskRow(task: Task): TaskRow {
+  return {
+    taskId: task.id,
+    goal: task.goal,
+    status: task.status,
+    attempt: task.runIds.length,
+    createdAt: task.createdAt,
+    updatedAt: task.updatedAt,
+    ...task.finalResult === undefined ? {} : { outcome: task.finalResult.outcome },
+  }
+}
+
+/**
+ * Renders the listing newest-first.
+ *
+ * Ordering is by `updatedAt` rather than `createdAt`: a long-running task that
+ * moved a second ago is what an operator is looking for, not the one that was
+ * opened last.
+ */
+export function renderTaskList(rows: readonly TaskRow[]): string {
+  if (rows.length === 0) {
+    return 'No tasks recorded. Create one with paimon_task_create.'
+  }
+  const header = `${rows.length} task(s), most recently updated first:`
+  const lines = rows.map(row => [
+    `${row.taskId.slice(0, 8)}  ${row.status.padEnd(16)}`,
+    `attempt ${row.attempt}`,
+    `updated ${row.updatedAt}`,
+    row.outcome === undefined ? '' : `outcome ${row.outcome}`,
+    `\n    ${row.goal}`,
+  ].filter(part => part.length > 0).join('  '))
+  return [header, ...lines].join('\n')
+}
+
 /**
  * Renders a report as prose for the model.
  *

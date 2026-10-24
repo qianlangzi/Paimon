@@ -1,15 +1,11 @@
-import type { TaskError, TaskErrorKind } from './types.ts'
+import type { RetryPolicy, TaskError } from './types.ts'
 
 /**
- * How many attempts a task may spend and which failures justify another one.
- *
- * `maxAttempts` counts the first attempt, so `maxAttempts: 3` means one initial
- * run plus at most two retries.
+ * The retry policy shape is part of the task aggregate, so it is declared in
+ * `types.ts` with the rest of the durable model and re-exported here, where
+ * every existing caller looks for it.
  */
-export interface RetryPolicy {
-  readonly maxAttempts: number
-  readonly retryableKinds: readonly TaskErrorKind[]
-}
+export type { RetryPolicy } from './types.ts'
 
 /**
  * Default policy: three attempts, retrying only failures that another attempt

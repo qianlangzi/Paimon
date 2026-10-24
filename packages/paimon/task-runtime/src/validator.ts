@@ -4,6 +4,7 @@ import type {
   EvidenceKind,
   ValidationCheck,
   ValidationReport,
+  ValidationRuleSpec,
 } from './types.ts'
 
 /**
@@ -164,6 +165,55 @@ export function customRule(
         note: undefined,
       }
     },
+  }
+}
+
+/**
+ * Rebuilds a rule from its serialisable description.
+ *
+ * This is how a task restored from disk stays verifiable: the closure that
+ * created the rule died with the previous process, but its spec did not.
+ * Unknown kinds throw rather than degrading to "no rule", because a rule set
+ * that silently shrinks would turn a failed verification into a pass.
+ */
+export function ruleFromSpec(spec: ValidationRuleSpec): ValidationRule {
+  switch (spec.kind) {
+    case 'test-report':
+      return testReportRule({
+        id: spec.id,
+        description: spec.description,
+        ...spec.ref === undefined ? {} : { ref: spec.ref },
+      })
+    case 'command-exit':
+      return commandExitRule({
+        id: spec.id,
+        description: spec.description,
+        commandRef: spec.commandRef,
+        ...spec.expectExitCode === undefined ? {} : { expectExitCode: spec.expectExitCode },
+      })
+    case 'file-state':
+      return fileStateRule({
+        id: spec.id,
+        description: spec.description,
+        path: spec.path,
+        ...spec.expectPresent === undefined ? {} : { expectPresent: spec.expectPresent },
+      })
+    case 'any-tool-success':
+      return {
+        id: spec.id,
+        description: spec.description,
+        evaluate: (evidence) => {
+          const trusted = authoritativeOnly(evidence)
+          const succeeded = trusted.some(item => item.kind === 'tool-result' && item.passed === true)
+          return {
+            id: spec.id,
+            description: spec.description,
+            outcome: succeeded ? 'passed' : 'not-checked',
+            evidence: trusted.map(item => item.id),
+            note: succeeded === false ? 'no tool call has succeeded yet' : undefined,
+          }
+        },
+      }
   }
 }
 

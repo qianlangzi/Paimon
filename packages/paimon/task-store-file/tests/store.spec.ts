@@ -143,20 +143,40 @@ describe('file store: damaged input', () => {
     expect(store.listEvents().map(item => item.id)).toEqual(['event-1'])
   })
 
-  it('refuses to start when a non-final line is unparseable', () => {
+  it('quarantines unparseable middle lines instead of refusing to start', () => {
     const directory = temporaryDirectory()
     const path = join(directory, EVENTS_FILE)
     writeFileSync(path, `{"broken\n${JSON.stringify(event)}\n`, 'utf8')
 
-    // History is the point of this file; skipping a bad middle line would
-    // silently lose facts, so the store reports it instead.
-    expect(() => new FileTaskStore({ directory })).toThrow(/line 1 is not a valid event/)
+    // History is the point of this file, so a bad middle line is never skipped
+    // silently: the file is set aside intact and the reason is reported. What
+    // it must not do is take the agent down, because task records are not the
+    // product.
+    const store = new FileTaskStore({ directory })
+    expect(store.listEvents()).toEqual([])
+    expect(store.problems.join('\n')).toMatch(/line 1 is not a valid event/)
+    expect(() => readFileSync(`${path}.corrupt`, 'utf8')).not.toThrow()
   })
 
-  it('rejects a snapshot written by a different layout version', () => {
+  it('quarantines a snapshot written by a different layout version', () => {
     const directory = temporaryDirectory()
     writeFileSync(join(directory, 'tasks.json'), JSON.stringify({ version: 99, items: {} }), 'utf8')
-    expect(() => new FileTaskStore({ directory })).toThrow(/declares version 99/)
+
+    const store = new FileTaskStore({ directory })
+    expect(store.listTasks()).toEqual([])
+    expect(store.problems.join('\n')).toMatch(/declares version 99/)
+  })
+
+  it('keeps readable files when only one of them is damaged', () => {
+    const directory = temporaryDirectory()
+    const healthy = new FileTaskStore({ directory })
+    healthy.saveTask(task)
+    writeFileSync(join(directory, 'runs.json'), '{ not json', 'utf8')
+
+    const store = new FileTaskStore({ directory })
+    expect(store.getTask(task.id)?.id).toBe(task.id)
+    expect(store.listRuns(task.id)).toEqual([])
+    expect(store.problems).toHaveLength(1)
   })
 })
 
@@ -190,5 +210,30 @@ describe('file store: end-to-end with the runtime', () => {
     )
     expect(readFileSync(join(directory, EVENTS_FILE), 'utf8').trim().split('\n').length)
       .toBe(second.getEvents(created.id).length)
+  })
+
+  it('keeps a task verifiable after the process that created it is gone', () => {
+    const directory = temporaryDirectory()
+    const options = {
+      store: new FileTaskStore({ directory }),
+      clock: createManualClock(1_700_000_000_000),
+    }
+    // Rules are closures and die with the process, so a task created with
+    // closures alone reloads with no completion conditions at all. Specs are
+    // the only form that survives; this is the regression that proves it.
+    const first = new TaskRuntime(options)
+    const created = first.createTask({
+      goal: 'fix the build',
+      workspace: '/repo/project',
+      ruleSpecs: [{ kind: 'test-report', id: 'tests', description: 'the tests pass' }],
+    })
+    first.startRun(created.id)
+
+    const second = new TaskRuntime({ store: new FileTaskStore({ directory }) })
+    const report = second.checkCompletion(created.id, [
+      { id: 'e1', kind: 'test-report', ref: 'tool:run_tests', passed: true, detail: '42 passed' },
+    ])
+    expect(report.checks.map(check => check.id)).toEqual(['tests'])
+    expect(report.satisfied).toBe(true)
   })
 })

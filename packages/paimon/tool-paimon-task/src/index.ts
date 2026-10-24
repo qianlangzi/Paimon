@@ -1,11 +1,12 @@
 /**
  * Model-facing Paimon task tools.
  *
- * Three controls over the task governance layer: create, inspect, and attempt
- * to finish. The finish control deliberately cannot assert success — it asks
- * the validator, and only observed evidence decides. That keeps the model's
- * agency (it chooses when to check) separate from its authority (it cannot
- * declare the work verified).
+ * Five controls over the task governance layer: create, inspect, list, attempt
+ * to finish, and abandon. The finish control deliberately cannot assert success
+ * — it asks the validator, and only observed evidence decides. That keeps the
+ * model's agency (it chooses when to check) separate from its authority (it
+ * cannot declare the work verified). Abandon is the deliberate opposite: it
+ * closes a task as failed, so dropping a goal always leaves a record.
  *
  * @module @deepseek-ai/dsh-tool-paimon-task
  */
@@ -20,16 +21,19 @@ import {
   type CompletionMode,
   COMPLETION_MODES,
   DEFAULT_COMPLETION_MODE,
-  completionRules,
+  completionRuleSpecs,
 } from './completion.ts'
 import {
   type EventSummary,
   type ReportSummary,
+  type TaskRow,
   type TaskSummary,
   renderReport,
   renderSummary,
+  renderTaskList,
   renderTimeline,
   reportSummary,
+  taskRow,
   taskSummary,
 } from './view.ts'
 
@@ -106,6 +110,31 @@ const FINISH_VALUE_SCHEMA = {
   },
 } as const
 
+const TASK_ROW_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    taskId: { type: 'string', required: true },
+    goal: { type: 'string', required: true },
+    status: { type: 'string', required: true },
+    attempt: { type: 'integer', required: true },
+    createdAt: { type: 'string', required: true },
+    updatedAt: { type: 'string', required: true },
+    outcome: { type: 'string' },
+  },
+} as const
+
+const LIST_VALUE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    tasks: { type: 'array', required: true, items: TASK_ROW_SCHEMA },
+  },
+} as const
+
+/** How many tasks `paimon_task_list` returns when the caller does not say. */
+const DEFAULT_LIST_LIMIT = 20
+
 const CREATE_DESCRIPTION =
   'Create a Paimon task for the current work and start its first attempt. '
   + 'A task is a goal that outlives this turn: it has a terminal state, a bounded retry budget, '
@@ -122,6 +151,16 @@ const FINISH_DESCRIPTION =
   + 'This does not assert success: if a condition is unmet the task stays open and the unmet checks are returned '
   + 'so you can keep working. Only observed tool evidence counts, never your own description of the result.'
 
+const LIST_DESCRIPTION =
+  'List recorded Paimon tasks, most recently updated first. '
+  + 'Use it to see what is still open, including tasks left behind by an earlier session, '
+  + 'before deciding whether to resume or abandon them.'
+
+const ABANDON_DESCRIPTION =
+  'Close a task as failed because the goal is being dropped, and record why. '
+  + 'Use it instead of paimon_task_finish when the work will not be completed, and to clear a task that a '
+  + 'previous session left open. Abandoning does not claim the work succeeded.'
+
 /** Rejects a call with no calling agent, which would have no task to act on. */
 function requireAgent(exec: ToolRunContext): Agent {
   const agent = exec.agent
@@ -135,7 +174,7 @@ function present(title: string, kind: 'read' | 'other', rawInput?: unknown): Gen
   return { card: 'generic', title, kind, ...rawInput === undefined ? {} : { rawInput } }
 }
 
-/** Registers the three task controls. */
+/** Registers the task controls. */
 export function apply(ctx: Context): void {
   ctx.tools.register(defineTool({
     name: 'paimon_task_create',
@@ -158,7 +197,9 @@ export function apply(ctx: Context): void {
       completion: {
         type: 'string',
         enum: [...COMPLETION_MODES],
-        description: 'How completion is verified. "tests" requires a passing test run; '
+        description: 'How completion is verified. "auto" (default) uses "tests" when this deployment '
+          + 'declares a test runner and "tool-success" otherwise, so a task is never created with a '
+          + 'condition this deployment cannot check. "tests" requires a passing test run; '
           + '"tool-success" only requires that some tool call succeeded.',
       },
     },
@@ -169,10 +210,13 @@ export function apply(ctx: Context): void {
     execute(args, exec) {
       const agent = requireAgent(exec)
       const mode = (args.completion ?? DEFAULT_COMPLETION_MODE) as CompletionMode
+      const rules = completionRuleSpecs(mode, {
+        hasTestTools: ctx.paimonTasks.testTools.length > 0,
+      })
       const task = ctx.paimonTasks.bind(agent, {
         goal: args.goal,
         workspace: args.workspace,
-        rules: completionRules(mode),
+        ruleSpecs: rules,
         ...args.deadline_ms === undefined ? {} : { deadlineMs: args.deadline_ms },
       })
       const run = ctx.paimonTasks.runtime.startRun(task.id)
@@ -262,6 +306,64 @@ export function apply(ctx: Context): void {
     },
     presentCall: () => present('Finish task', 'other'),
   }))
+
+  ctx.tools.register(defineTool({
+    name: 'paimon_task_list',
+    description: LIST_DESCRIPTION,
+    parameters: {
+      limit: {
+        type: 'number',
+        description: 'How many tasks to return, newest first. Defaults to 20.',
+      },
+    },
+    output: {
+      schema: LIST_VALUE_SCHEMA,
+      render: (_args: unknown, value: ListValue) => [{
+        type: 'text' as const,
+        text: renderTaskList(value.tasks),
+      }],
+    },
+    execute(args) {
+      const limit = args.limit === undefined ? DEFAULT_LIST_LIMIT : Math.max(1, Math.trunc(args.limit))
+      const rows = ctx.paimonTasks.runtime.listTasks()
+        .map(taskRow)
+        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+        .slice(0, limit)
+      return Promise.resolve({ tasks: rows })
+    },
+    presentCall: () => present('List tasks', 'read'),
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'paimon_task_abandon',
+    description: ABANDON_DESCRIPTION,
+    parameters: {
+      reason: {
+        type: 'string',
+        required: true,
+        description: 'Why the goal is being dropped. Recorded in the task timeline.',
+      },
+      task_id: {
+        type: 'string',
+        description: 'Task to abandon. Defaults to this agent\'s task.',
+      },
+    },
+    output: {
+      schema: TASK_SUMMARY_SCHEMA,
+      render: (_args: unknown, value: TaskSummary) => [{ type: 'text' as const, text: renderSummary(value) }],
+    },
+    execute(args, exec) {
+      const agent = requireAgent(exec)
+      const service = ctx.paimonTasks
+      const taskId = args.task_id ?? service.taskOf(agent)?.id
+      if (taskId === undefined) {
+        throw new Error('this agent has no Paimon task; pass task_id to abandon another one')
+      }
+      const abandoned = service.abandon(taskId, args.reason)
+      return Promise.resolve(taskSummary(abandoned, service.runtime.listRuns(abandoned.id)))
+    },
+    presentCall: args => present('Abandon task', 'other', args.reason),
+  }))
 }
 
 /** Shape of `paimon_task_status`'s canonical value. */
@@ -276,4 +378,9 @@ interface FinishValue {
   readonly completed: boolean
   readonly status: string
   readonly report: ReportSummary
+}
+
+/** Shape of `paimon_task_list`'s canonical value. */
+interface ListValue {
+  readonly tasks: TaskRow[]
 }

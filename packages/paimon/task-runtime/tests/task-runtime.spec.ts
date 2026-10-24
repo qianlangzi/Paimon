@@ -424,3 +424,100 @@ describe('task runtime: completion probing', () => {
     expect(runtime.completeRun(task.id, [passingTests], 'done').kind).toBe('succeeded')
   })
 })
+
+describe('task runtime: settling after the deadline', () => {
+  it('refuses to report success once the budget is spent', () => {
+    // Otherwise a task could buy its way out of the limit it was given simply
+    // by finishing late, and the deadline would only bind the honest.
+    const { runtime, clock } = harness()
+    const task = runtime.createTask({ goal: 'slow job', deadlineMs: 1_000, rules: [rule] })
+    runtime.startRun(task.id)
+    clock.advance(1_500)
+
+    const outcome = runtime.completeRun(task.id, [passingTests], 'finished late')
+    expect(outcome.kind).toBe('failed')
+    const settled = runtime.getTask(task.id)
+    expect(settled.status).toBe('TIMED_OUT')
+    expect(settled.finalResult?.outcome).toBe('timed-out')
+    expect(runtime.listRuns(task.id)[0]?.status).toBe('TIMED_OUT')
+  })
+})
+
+describe('task runtime: abandonment', () => {
+  it('closes a running task as failed and says why', () => {
+    const { runtime } = harness()
+    const task = runtime.createTask({ goal: 'abandoned goal' })
+    runtime.startRun(task.id)
+
+    const abandoned = runtime.abandon(task.id, 'the user dropped the request')
+    expect(abandoned.status).toBe('FAILED')
+    expect(abandoned.finalResult?.outcome).toBe('failed')
+    expect(runtime.listRuns(task.id)[0]?.status).toBe('FAILED')
+    expect(runtime.listRuns(task.id)[0]?.error?.kind).toBe('abandoned')
+    expect(runtime.getEvents(task.id).map(event => event.type)).toContain('task/abandoned')
+  })
+
+  it('closes a task that never started', () => {
+    const { runtime } = harness()
+    const task = runtime.createTask({ goal: 'never started' })
+    expect(runtime.abandon(task.id, 'dropped before it began').status).toBe('FAILED')
+  })
+
+  it('is a no-op on a task that already finished', () => {
+    const { runtime } = harness()
+    const task = runtime.createTask({ goal: 'job', rules: [rule] })
+    runtime.startRun(task.id)
+    runtime.completeRun(task.id, [passingTests], 'done')
+
+    expect(runtime.abandon(task.id, 'late click').status).toBe('SUCCEEDED')
+    expect(runtime.getEvents(task.id).filter(event => event.type === 'task/abandoned')).toHaveLength(0)
+  })
+
+  it('throws for an unknown task instead of inventing one', () => {
+    const { runtime } = harness()
+    expect(() => runtime.abandon('nope', 'reason')).toThrow(TaskNotFoundError)
+  })
+})
+
+describe('task runtime: conditions as data', () => {
+  it('verifies a task whose rules arrived as specs', () => {
+    // The path a restored task takes: no live closure exists for this process,
+    // so the specs stored on the task are the only way to verify it.
+    const { runtime } = harness()
+    const task = runtime.createTask({
+      goal: 'job',
+      ruleSpecs: [{ kind: 'test-report', id: 'tests', description: 'unit tests pass' }],
+    })
+    runtime.startRun(task.id)
+
+    const report = runtime.checkCompletion(task.id, [passingTests])
+    expect(report.checks.map(check => check.id)).toEqual(['tests'])
+    expect(report.satisfied).toBe(true)
+  })
+
+  it('still prefers a live rule set when one is registered', () => {
+    const { runtime } = harness()
+    const task = runtime.createTask({
+      goal: 'job',
+      rules: [rule],
+      // A spec that would pass trivially; the live rule must win, so the
+      // stricter condition stays in force.
+      ruleSpecs: [{ kind: 'any-tool-success', id: 'loose', description: 'anything ran' }],
+    })
+    runtime.startRun(task.id)
+
+    expect(runtime.checkCompletion(task.id, [passingTests]).checks.map(check => check.id)).toEqual(['tests'])
+  })
+})
+
+describe('task runtime: relative paths', () => {
+  it('resolves a relative path against the workspace, not the process cwd', () => {
+    const { runtime } = harness()
+    const workspace = resolve('/tmp/paimon-relative-ws')
+    const task = runtime.createTask({ goal: 'edit code', workspace })
+    runtime.startRun(task.id)
+
+    expect(runtime.gateToolCall(task.id, { toolId: 'fs_read', path: 'src/a.ts' }).kind).toBe('allow')
+    expect(runtime.gateToolCall(task.id, { toolId: 'fs_read', path: '../escape.ts' }).kind).toBe('deny')
+  })
+})
