@@ -2,13 +2,24 @@
 #
 # Applied on top of a stock dsh profile with `--patch`:
 #
-#   dsh --profile paimon headless --patch packages/paimon/profile/cordis.patch.yml "<goal>"
+#   dsh --profile paimon --patch packages/paimon/profile/cordis.patch.yml "<goal>"
 #
 # It inserts the task governance layer after the stock rows. The adapter has to
 # be mounted before the model-facing tools, because the tools inject the
 # `paimonTasks` service it provides; Cordis keeps the tool plugin waiting until
 # that service exists, so the order here is a readability choice rather than a
 # correctness requirement.
+
+# The headless template disables the managed credential store, because an
+# unattended run is expected to receive secrets through the environment
+# (`dsh-headless` patches `authorization`, `deepseek-account` and `credentials`
+# to `disabled: true`). Paimon runs interactively as the user, so it re-enables
+# the store that the web Models page writes and that `$DSH_HOME/.credentials.yaml`
+# already holds — without this, a key that is stored and valid still reports
+# MISSING_CREDENTIAL.
+- id: credentials
+  disabled: false
+
 - insert:
     - id: paimon-task-harness
       name: '@deepseek-ai/dsh-paimon-task-harness'
