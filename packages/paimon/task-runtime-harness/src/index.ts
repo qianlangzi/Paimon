@@ -97,34 +97,38 @@ export class PaimonTaskService extends Service {
     knownSecrets: z.array(z.string()).default([]),
   })
 
-  readonly #bindings: TaskBindings
-  readonly #approvalTools: ReadonlySet<string>
-  readonly #testTools: ReadonlySet<string>
-  readonly #pathKeys: readonly string[]
-  readonly #defaultDeadlineMs: number
+  // Cordis wraps a Service in a Proxy, so ECMAScript private fields (`#x`)
+  // cannot be read through it: the proxy receiver is not the instance that
+  // declared them. TypeScript `private` compiles to ordinary properties and
+  // survives the proxy, which is why every service in this repository uses it.
+  private readonly taskBindings: TaskBindings
+  private readonly approvalTools: ReadonlySet<string>
+  private readonly testTools: ReadonlySet<string>
+  private readonly pathKeys: readonly string[]
+  private readonly defaultDeadlineMs: number
 
   constructor(ctx: Context, config: Config = {}) {
     super(ctx, 'paimonTasks')
-    this.#approvalTools = new Set(config.approvalTools ?? [])
-    this.#testTools = new Set(config.testTools ?? [])
-    this.#pathKeys = config.pathArgumentKeys ?? DEFAULT_PATH_ARGUMENT_KEYS
-    this.#defaultDeadlineMs = config.deadlineMs ?? 0
-    this.#bindings = new TaskBindings(new TaskRuntime({
+    this.approvalTools = new Set(config.approvalTools ?? [])
+    this.testTools = new Set(config.testTools ?? [])
+    this.pathKeys = config.pathArgumentKeys ?? DEFAULT_PATH_ARGUMENT_KEYS
+    this.defaultDeadlineMs = config.deadlineMs ?? 0
+    this.taskBindings = new TaskBindings(new TaskRuntime({
       knownSecrets: config.knownSecrets ?? [],
     }))
 
-    this.ctx.on('tools/pre-execute', async (exec, next) => this.#gate(exec, next))
-    this.ctx.on('tools/result', (exec, result) => { this.#observe(exec, result) })
+    this.ctx.on('tools/pre-execute', async (exec, next) => this.gateCall(exec, next))
+    this.ctx.on('tools/result', (exec, result) => { this.observe(exec, result) })
   }
 
   /** The governance runtime, for queries and completion. */
   get runtime(): TaskRuntime {
-    return this.#bindings.runtime
+    return this.taskBindings.runtime
   }
 
   /** The agent-to-task associations this adapter manages. */
   get bindings(): TaskBindings {
-    return this.#bindings
+    return this.taskBindings
   }
 
   /**
@@ -135,8 +139,8 @@ export class PaimonTaskService extends Service {
    */
   bind(agent: AgentRef, input: BindInput): Task {
     const deadlineMs = input.deadlineMs
-      ?? (this.#defaultDeadlineMs > 0 ? this.#defaultDeadlineMs : undefined)
-    return this.#bindings.bind(agent, {
+      ?? (this.defaultDeadlineMs > 0 ? this.defaultDeadlineMs : undefined)
+    return this.taskBindings.bind(agent, {
       goal: input.goal,
       workspace: input.workspace,
       deadlineMs,
@@ -147,7 +151,7 @@ export class PaimonTaskService extends Service {
 
   /** The task bound to this agent, if any. */
   taskOf(agent: AgentRef): Task | undefined {
-    return this.#bindings.taskOf(agent)
+    return this.taskBindings.taskOf(agent)
   }
 
   /**
@@ -160,37 +164,37 @@ export class PaimonTaskService extends Service {
    * down.
    */
   async cancel(agent: Agent): Promise<Task | undefined> {
-    const requested = this.#bindings.requestCancel(agent)
+    const requested = this.taskBindings.requestCancel(agent)
     if (requested === undefined) return undefined
     agent.cancel({ kind: 'user' })
     await agent.whenIdle()
-    return this.#bindings.acknowledgeCancel(agent)
+    return this.taskBindings.acknowledgeCancel(agent)
   }
 
-  async #gate(
+  private async gateCall(
     exec: ToolExecution,
     next: () => Promise<PreToolDecision>,
   ): Promise<PreToolDecision> {
     const agent = exec.agent
-    if (agent === undefined || !this.#bindings.isBound(agent)) return next()
+    if (agent === undefined || !this.taskBindings.isBound(agent)) return next()
 
-    const decision = this.#bindings.gate(agent, {
+    const decision = this.taskBindings.gate(agent, {
       toolId: exec.name,
-      path: extractPathArgument(exec.arguments, this.#pathKeys),
-      requiresApproval: this.#approvalTools.has(exec.name),
+      path: extractPathArgument(exec.arguments, this.pathKeys),
+      requiresApproval: this.approvalTools.has(exec.name),
       detail: { callId: exec.callId },
     })
     if (decision === undefined) return next()
     if (decision.kind !== 'require-approval') return toPreToolDecision(decision)
 
-    const resolved = await this.#askApproval(exec, agent, decision.reason)
-    const settled = this.#bindings.resolveApproval(agent, resolved.approved, resolved.reason)
+    const resolved = await this.askApproval(exec, agent, decision.reason)
+    const settled = this.taskBindings.resolveApproval(agent, resolved.approved, resolved.reason)
     // `settled` is undefined only if the task was not actually waiting, which
     // would mean this layer lost track of its own state. Fail closed.
     return toPreToolDecision(settled ?? { kind: 'deny', reason: resolved.reason })
   }
 
-  async #askApproval(
+  private async askApproval(
     exec: ToolExecution,
     agent: Agent,
     reason: string,
@@ -211,14 +215,14 @@ export class PaimonTaskService extends Service {
     }
   }
 
-  #observe(exec: Readonly<ToolExecution>, result: Readonly<ToolExecutionResult>): void {
+  private observe(exec: Readonly<ToolExecution>, result: Readonly<ToolExecutionResult>): void {
     const agent = exec.agent
-    if (agent === undefined || !this.#bindings.isBound(agent)) return
-    this.#bindings.recordToolOutcome(agent, {
+    if (agent === undefined || !this.taskBindings.isBound(agent)) return
+    this.taskBindings.recordToolOutcome(agent, {
       callId: exec.callId,
       toolName: exec.name,
       result,
-      testTools: [...this.#testTools],
+      testTools: [...this.testTools],
     })
   }
 }

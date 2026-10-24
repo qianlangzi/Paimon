@@ -67,6 +67,12 @@ await ctx.paimonTasks.cancel(agent)
 
 任何投递失败（包括在未打开的轮次外提问）都按拒绝处理。问不出来的审批不等于批准。
 
+## 开发备注
+
+**Service 的实例状态必须用 TypeScript `private`，不能用 `#private`。** Cordis 会把 `Service` 包在 `Proxy` 里，而 ECMAScript 私有字段无法穿过它读取——proxy 的 receiver 不是声明该字段的实例。首次集成运行就报 `Cannot read private member #x from an object whose class did not declare it`；`ApprovalService` 用 TypeScript `private` 正是同一原因。Cordis 对象图之外的普通类（`TaskRuntime`、`TaskBindings`）不受影响，继续用 `#`。
+
+**`tests/pipeline.spec.ts` 是接线证明。** 它挂载真实的 `ToolRuntime`、`NativeToolExecutor` 和 `ApprovalService`，再通过 `executeToolFixture` 驱动调用，所以跑的是**随发行版交付的那条** `tools/pre-execute` waterfall。单元测试证明适配器自洽；这一条证明它接上了。
+
 ## 已知限制与延期工作
 
 - **任务创建是程序化的。** 目前没有面向模型的工具，也没有 UI 来创建任务；调用方必须在代码里调 `bind()`。`paimon_task_create` 工具是下一个里程碑。

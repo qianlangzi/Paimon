@@ -68,6 +68,22 @@ The adapter asks `ctx.approval.request()` itself rather than returning `{kind:'a
 
 Any delivery failure (including asking outside an open turn) is treated as a refusal. An approval that could not be asked is not granted.
 
+## Development notes
+
+**Service state must use TypeScript `private`, not `#private`.** Cordis wraps a
+`Service` in a `Proxy`, and an ECMAScript private field cannot be read through
+it — the proxy receiver is not the instance that declared the field. The first
+integration run failed with `Cannot read private member #x from an object whose
+class did not declare it`; `ApprovalService` uses TypeScript `private` for the
+same reason. Plain classes outside the Cordis object graph (`TaskRuntime`,
+`TaskBindings`) are unaffected and keep `#`.
+
+**`tests/pipeline.spec.ts` is the wiring proof.** It mounts the real
+`ToolRuntime`, `NativeToolExecutor` and `ApprovalService`, then drives calls
+through `executeToolFixture`, so the `tools/pre-execute` waterfall that runs is
+the shipped one. Unit specs prove the adapter is self-consistent; this one
+proves it is connected.
+
 ## Known Limitations and Deferred Work
 
 - **Task creation is programmatic.** There is no model-facing tool and no UI to create a task yet; a caller must invoke `bind()` from code. A `paimon_task_create` tool is the next milestone.
