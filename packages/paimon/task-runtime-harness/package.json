@@ -28,7 +28,9 @@
     "@deepseek-ai/dsh-user-approval": "workspace:*"
   },
   "dependencies": {
+    "@deepseek-ai/dsh-home-paths": "workspace:*",
     "@deepseek-ai/dsh-paimon-task-runtime": "workspace:*",
+    "@deepseek-ai/dsh-paimon-task-store-file": "workspace:*",
     "@deepseek-ai/schemastery": "workspace:~"
   },
   "devDependencies": {

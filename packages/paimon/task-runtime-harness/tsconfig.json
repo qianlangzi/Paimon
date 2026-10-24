@@ -24,7 +24,13 @@
       "path": "../../interaction/user-approval"
     },
     {
+      "path": "../../util/home-paths"
+    },
+    {
       "path": "../task-runtime"
+    },
+    {
+      "path": "../task-store-file"
     }
   ]
 }

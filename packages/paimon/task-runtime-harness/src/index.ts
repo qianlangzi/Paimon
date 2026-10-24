@@ -19,14 +19,17 @@
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import {
   TaskRuntime,
   type CreateTaskInput,
   type Task,
 } from '@deepseek-ai/dsh-paimon-task-runtime'
+import { FileTaskStore } from '@deepseek-ai/dsh-paimon-task-store-file'
 import type { PreToolDecision, ToolExecution, ToolExecutionResult } from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-user-approval'
 import z from '@deepseek-ai/schemastery'
+import { join } from 'node:path'
 import { TaskBindings, type AgentRef } from './binding.ts'
 import { type ResolvedApproval, approvalToResolved, toPreToolDecision } from './mapping.ts'
 import { DEFAULT_PATH_ARGUMENT_KEYS, extractPathArgument } from './path-args.ts'
@@ -66,6 +69,13 @@ export interface Config {
   readonly testTools?: string[]
   /** Default wall-clock budget applied by {@link PaimonTaskService.bind}. */
   readonly deadlineMs?: number
+  /**
+   * Keep tasks under `$DSH_HOME/paimon/tasks` instead of in memory.
+   *
+   * Off by default on purpose: a test or an embedded use that constructs this
+   * service must never write into the developer's real harness home.
+   */
+  readonly persist?: boolean
   /** Strings scrubbed from every recorded task event. */
   readonly knownSecrets?: string[]
 }
@@ -94,6 +104,7 @@ export class PaimonTaskService extends Service {
     pathArgumentKeys: z.array(z.string()).default([...DEFAULT_PATH_ARGUMENT_KEYS]),
     testTools: z.array(z.string()).default([]),
     deadlineMs: z.number().default(0),
+    persist: z.boolean().default(false),
     knownSecrets: z.array(z.string()).default([]),
   })
 
@@ -113,8 +124,12 @@ export class PaimonTaskService extends Service {
     this.testTools = new Set(config.testTools ?? [])
     this.pathKeys = config.pathArgumentKeys ?? DEFAULT_PATH_ARGUMENT_KEYS
     this.defaultDeadlineMs = config.deadlineMs ?? 0
+    const store = config.persist === true
+      ? new FileTaskStore({ directory: join(resolveDshHome(), 'paimon', 'tasks') })
+      : undefined
     this.taskBindings = new TaskBindings(new TaskRuntime({
       knownSecrets: config.knownSecrets ?? [],
+      store,
     }))
 
     this.ctx.on('tools/pre-execute', async (exec, next) => this.gateCall(exec, next))

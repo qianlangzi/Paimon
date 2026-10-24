@@ -4,6 +4,11 @@
 #
 #   dsh --profile paimon --patch packages/paimon/profile/cordis.patch.yml "<goal>"
 #
+# or installed into the profile's own patch layer once, by the script that keeps
+# this file as the reviewable source of truth:
+#
+#   node packages/paimon/profile/install.mjs --profile paimon
+#
 # It inserts the task governance layer after the stock rows. The adapter has to
 # be mounted before the model-facing tools, because the tools inject the
 # `paimonTasks` service it provides; Cordis keeps the tool plugin waiting until
@@ -28,5 +33,9 @@
         # own, a `tests` task stays unverifiable, which is the honest default.
         testTools: []
         approvalTools: []
+        # Keep tasks under `$DSH_HOME/paimon/tasks` so a restart can still show
+        # what the agent was doing. Off in code, on here: a library consumer or
+        # a test must never write into the user's real harness home.
+        persist: true
     - id: tool-paimon-task
       name: '@deepseek-ai/dsh-tool-paimon-task'
