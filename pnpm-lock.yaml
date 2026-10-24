@@ -12833,6 +12833,12 @@ importers:
         specifier: workspace:*
         version: link:../../core/tools
 
+  packages/paimon/task-runtime:
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:~
+        version: link:../../../vendor/cordis
+
   packages/plan/plan-mode:
     dependencies:
       '@deepseek-ai/dsh-brand':
