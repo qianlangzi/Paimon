@@ -52,13 +52,20 @@ export class TaskBindings {
   /**
    * Creates a task and binds it to an agent.
    *
-   * @throws when the agent already has a task. Rebinding would orphan the
-   * first task with a live run, so it is refused rather than silently
-   * replacing it.
+   * A *live* task cannot be replaced: rebinding would orphan the first task
+   * with a live run, so it is refused rather than silently swapped. A task that
+   * has already finished no longer governs the session, so it does not hold the
+   * slot either — otherwise one finished task would make every later request in
+   * the same session fail with "already bound".
    */
   bind(agent: AgentRef, input: CreateTaskInput): Task {
-    if (this.#taskByAgent.has(agent.id)) {
-      throw new Error(`agent ${agent.id} is already bound to a task`)
+    const existing = this.#taskByAgent.get(agent.id)
+    if (existing !== undefined) {
+      if (!isTerminalTaskStatus(this.#runtime.getTask(existing).status)) {
+        throw new Error(`agent ${agent.id} is already bound to a task`)
+      }
+      this.#taskByAgent.delete(agent.id)
+      this.#evidenceByTask.delete(existing)
     }
     const task = this.#runtime.createTask(input)
     this.#taskByAgent.set(agent.id, task.id)

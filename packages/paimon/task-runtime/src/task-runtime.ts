@@ -144,6 +144,14 @@ export class TaskRuntime {
 
   /** Creates a task in `PENDING` and records `task/created`. */
   createTask(input: CreateTaskInput): Task {
+    // A zero or negative budget is not "unlimited", it is an instant timeout:
+    // the deadline is compared against the moment the first run started, so
+    // any elapsed millisecond closes the task before it can work. Rejecting it
+    // keeps the two meanings from being confused at the only place that reads
+    // the number.
+    if (input.deadlineMs !== undefined && !(input.deadlineMs > 0)) {
+      throw new RangeError('deadlineMs must be a positive number of milliseconds; omit it for no deadline')
+    }
     const now = toIso(this.#clock)
     const task: Task = {
       id: this.#idFactory(),

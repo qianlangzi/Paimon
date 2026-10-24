@@ -11,14 +11,23 @@ import { apply } from '../src/index.ts'
  * end-to-end check available without booting a harness: the registration path,
  * argument plumbing and return shapes are all the production ones.
  */
-function mount(options: { testTools?: readonly string[] } = {}) {
+function mount(options: { testTools?: readonly string[]; failStart?: boolean } = {}) {
   const runtime = new TaskRuntime({
     clock: createManualClock(1_700_000_000_000),
     idFactory: (() => { let n = 0; return () => `id-${++n}` })(),
   })
   const bindings = new TaskBindings(runtime)
+  // The tools reach the runtime through the service, so a failing `startRun`
+  // has to be injected there rather than in the runtime itself.
+  const exposed = options.failStart === true
+    ? new Proxy(runtime, {
+      get: (target, property, receiver) => property === 'startRun'
+        ? () => { throw new Error('the executor refused to start') }
+        : Reflect.get(target, property, receiver),
+    })
+    : runtime
   const service = {
-    runtime,
+    runtime: exposed,
     bindings,
     testTools: options.testTools ?? [],
     bind: (agent: { id: string }, input: Parameters<TaskBindings['bind']>[1]) => bindings.bind(agent, input),
@@ -102,6 +111,28 @@ describe('paimon_task_create', () => {
   })
 })
 
+describe('paimon_task_create: a failed first attempt', () => {
+  it('does not wedge the agent on a task that never started', async () => {
+    // Bind happens before startRun. A start failure would otherwise leave the
+    // agent bound to a PENDING task with no deadline to expire it, so every
+    // later create answers "already bound" and the orphan is unclosable.
+    const { tool, exec, bindings, agent, runtime } = mount({ failStart: true })
+    const create = tool('paimon_task_create')
+
+    await expect(create.execute({ goal: 'g', workspace: '/w' }, exec)).rejects.toThrow(/refused to start/)
+
+    expect(bindings.isBound(agent)).toBe(false)
+    const orphan = runtime.listTasks()[0]
+    expect(orphan?.status).toBe('FAILED')
+    expect(orphan?.finalResult?.outcome).toBe('failed')
+
+    // The agent can try again, which is the point of releasing the binding.
+    const again = mount()
+    await expect(again.tool('paimon_task_create').execute({ goal: 'g', workspace: '/w' }, again.exec))
+      .resolves.toMatchObject({ status: 'RUNNING' })
+  })
+})
+
 describe('paimon_task_finish', () => {
   it('leaves the task open when the condition is unmet, so work can continue', async () => {
     const { tool, exec, runtime } = mount()
@@ -149,6 +180,26 @@ describe('paimon_task_finish', () => {
     await create.execute({ goal: 'g', workspace: '/w', completion: 'tests' }, exec)
     const value = await finish.execute({ summary: 'everything passes, trust me' }, exec) as { completed: boolean }
     expect(value.completed).toBe(false)
+  })
+})
+
+describe('paimon_task_finish while an approval is pending', () => {
+  it('reports the wait instead of throwing at the model', async () => {
+    const { tool, exec, runtime } = mount()
+    const created = await tool('paimon_task_create').execute({ goal: 'g', workspace: '/w' }, exec) as { taskId: string }
+    // Park the task the way the tool pipeline does when a call needs a human.
+    runtime.gateToolCall(created.taskId, { toolId: 'bash', requiresApproval: true })
+
+    const value = await tool('paimon_task_finish').execute({ summary: 'done' }, exec) as {
+      completed: boolean
+      status: string
+      note?: string
+      report: { checks: unknown[] }
+    }
+    expect(value.completed).toBe(false)
+    expect(value.status).toBe('WAITING_APPROVAL')
+    expect(value.note).toMatch(/waiting for a human approval/)
+    expect(value.report.checks).toEqual([])
   })
 })
 
@@ -224,6 +275,43 @@ describe('paimon_task_abandon', () => {
       reason: 'the process that owned it exited',
     }, exec) as { status: string }
     expect(value.status).toBe('FAILED')
+  })
+})
+
+describe('after a task finishes', () => {
+  it('lets the same agent start a new task', async () => {
+    // A finished task no longer governs the session, so it must not keep the
+    // agent's slot: otherwise the first completed task ends the session's
+    // ability to do any later work.
+    const { tool, exec, bindings, agent } = mount()
+    const create = tool('paimon_task_create')
+    const finish = tool('paimon_task_finish')
+
+    await create.execute({ goal: 'first', workspace: '/w', completion: 'tool-success' }, exec)
+    bindings.recordToolOutcome(agent, { callId: 'c1', toolName: 'read_file', result: { isError: false } })
+    await finish.execute({ summary: 'done' }, exec)
+
+    const second = await create.execute({ goal: 'second', workspace: '/w' }, exec) as { status: string }
+    expect(second.status).toBe('RUNNING')
+    expect(bindings.taskOf(agent)?.goal).toBe('second')
+    // The old task's evidence must not leak into the new one.
+    expect(bindings.evidenceOf(agent)).toEqual([])
+  })
+
+  it('answers a second finish with the recorded result instead of throwing', async () => {
+    const { tool, exec, bindings, agent } = mount()
+    await tool('paimon_task_create').execute({ goal: 'g', workspace: '/w', completion: 'tool-success' }, exec)
+    bindings.recordToolOutcome(agent, { callId: 'c1', toolName: 'read_file', result: { isError: false } })
+    await tool('paimon_task_finish').execute({ summary: 'done' }, exec)
+
+    const again = await tool('paimon_task_finish').execute({ summary: 'done again' }, exec) as {
+      completed: boolean
+      status: string
+      note?: string
+    }
+    expect(again.completed).toBe(true)
+    expect(again.status).toBe('SUCCEEDED')
+    expect(again.note).toMatch(/already finished/)
   })
 })
 

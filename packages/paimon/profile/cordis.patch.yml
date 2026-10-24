@@ -39,3 +39,9 @@
         persist: true
     - id: tool-paimon-task
       name: '@deepseek-ai/dsh-tool-paimon-task'
+    # The Host read model. Mounted now so `ctx.paimonTask` exists in this
+    # profile before the desktop views need it; it has no model-facing surface
+    # and no consumer yet, so activation is all there is to verify at this
+    # stage (see Paimon-M5-Plan.md, S1).
+    - id: paimon-controller
+      name: '@deepseek-ai/dsh-paimon-controller'

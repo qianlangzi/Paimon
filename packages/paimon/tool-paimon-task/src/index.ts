@@ -17,6 +17,7 @@ import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { GenericCallView } from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-paimon-task-harness'
+import { ApprovalPendingError, isTerminalTaskStatus } from '@deepseek-ai/dsh-paimon-task-runtime'
 import {
   type CompletionMode,
   COMPLETION_MODES,
@@ -107,6 +108,7 @@ const FINISH_VALUE_SCHEMA = {
     completed: { type: 'boolean', required: true },
     status: { type: 'string', required: true },
     report: { ...REPORT_SCHEMA, required: true },
+    note: { type: 'string' },
   },
 } as const
 
@@ -192,7 +194,8 @@ export function apply(ctx: Context): void {
       },
       deadline_ms: {
         type: 'number',
-        description: 'Optional wall-clock budget for the whole task. Without one the task never times out.',
+        description: 'Optional positive wall-clock budget in milliseconds for the whole task. '
+          + 'Omit it for no budget; a task without one never times out.',
       },
       completion: {
         type: 'string',
@@ -219,7 +222,17 @@ export function apply(ctx: Context): void {
         ruleSpecs: rules,
         ...args.deadline_ms === undefined ? {} : { deadlineMs: args.deadline_ms },
       })
-      const run = ctx.paimonTasks.runtime.startRun(task.id)
+      let run
+      try {
+        run = ctx.paimonTasks.runtime.startRun(task.id)
+      } catch (error) {
+        // The binding is already in place, and a task whose first attempt never
+        // started has no deadline to expire it. Leaving it would wedge the
+        // agent: every later create would be refused as "already bound" and the
+        // orphan could never be closed. Abandoning it releases both.
+        ctx.paimonTasks.abandon(task.id, `the first attempt could not start: ${messageOf(error)}`)
+        throw error
+      }
       return Promise.resolve(
         taskSummary(ctx.paimonTasks.runtime.getTask(task.id), [run]),
       )
@@ -274,9 +287,11 @@ export function apply(ctx: Context): void {
       schema: FINISH_VALUE_SCHEMA,
       render: (_args: unknown, value: FinishValue) => [{
         type: 'text' as const,
-        text: value.completed
-          ? `Task ${value.status}. ${renderReport(value.report)}`
-          : `Task still open (${value.status}). ${renderReport(value.report)}`,
+        text: value.note !== undefined
+          ? `Task still open (${value.status}). ${value.note}`
+          : value.completed
+            ? `Task ${value.status}. ${renderReport(value.report)}`
+            : `Task still open (${value.status}). ${renderReport(value.report)}`,
       }],
     },
     execute(args, exec) {
@@ -287,9 +302,37 @@ export function apply(ctx: Context): void {
         throw new Error('this agent has no Paimon task; call paimon_task_create first')
       }
       const evidence = service.bindings.evidenceOf(agent)
-      // Probe first: a failing check must leave the task open rather than
-      // close the run, so a model that checks too early can keep working.
-      const report = service.runtime.checkCompletion(task.id, evidence)
+      // A finished task has no active run, so settling it again would throw.
+      // Answering with the recorded result is what the caller actually wants
+      // and keeps a second finish call from looking like a failure.
+      if (isTerminalTaskStatus(task.status)) {
+        const recorded = task.finalResult?.validation
+        return Promise.resolve({
+          completed: task.status === 'SUCCEEDED',
+          status: task.status,
+          report: recorded === undefined ? { satisfied: false, checks: [] } : reportSummary(recorded),
+          note: 'this task has already finished; the report above is its recorded outcome',
+        })
+      }
+      let report
+      try {
+        // Probe first: a failing check must leave the task open rather than
+        // close the run, so a model that checks too early can keep working.
+        report = service.runtime.checkCompletion(task.id, evidence)
+      } catch (error) {
+        // A task parked for a human decision cannot be verified yet. That is a
+        // state, not a failure of the call, so it is reported rather than
+        // thrown: the model should wait, not retry blindly.
+        if (error instanceof ApprovalPendingError) {
+          return Promise.resolve({
+            completed: false,
+            status: task.status,
+            report: { satisfied: false, checks: [] },
+            note: 'the task is waiting for a human approval decision; nothing can be verified until it is made',
+          })
+        }
+        throw error
+      }
       if (!report.satisfied) {
         return Promise.resolve({
           completed: false,
@@ -378,9 +421,15 @@ interface FinishValue {
   readonly completed: boolean
   readonly status: string
   readonly report: ReportSummary
+  /** Present when the call was refused for a reason rather than answered. */
+  readonly note?: string
 }
 
 /** Shape of `paimon_task_list`'s canonical value. */
 interface ListValue {
   readonly tasks: TaskRow[]
+}
+
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }

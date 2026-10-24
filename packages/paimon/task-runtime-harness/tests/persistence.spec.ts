@@ -128,3 +128,29 @@ describe('read model', () => {
     })
   })
 })
+
+describe('completion conditions through the adapter', () => {
+  it('keeps the rule specs a caller supplied, and can verify with them', async () => {
+    // The adapter is the only path a model-created task takes, and it used to
+    // drop `ruleSpecs` on the floor: the task then had no completion condition
+    // at all and could never be verified. Only a real end-to-end run showed it,
+    // because the tool specs drive a stubbed service.
+    const home = temporaryHome()
+    await withDshHome(home, async () => {
+      const ctx = await mount({ persist: true })
+      const task = ctx.paimonTasks.bind(agent, {
+        goal: 'verifiable',
+        workspace,
+        ruleSpecs: [{ kind: 'any-tool-success', id: 'tool-success', description: 'something ran' }],
+      })
+      ctx.paimonTasks.runtime.startRun(task.id)
+
+      expect(ctx.paimonTasks.runtime.getTask(task.id).ruleSpecs).toHaveLength(1)
+      const report = ctx.paimonTasks.runtime.checkCompletion(task.id, [
+        { id: 'e1', kind: 'tool-result', ref: 'tool:read_file', passed: true, detail: 'ok' },
+      ])
+      expect(report.checks.map(check => check.id)).toEqual(['tool-success'])
+      expect(report.satisfied).toBe(true)
+    })
+  })
+})

@@ -12833,6 +12833,22 @@ importers:
         specifier: workspace:*
         version: link:../../core/tools
 
+  packages/paimon/paimon-controller:
+    dependencies:
+      '@deepseek-ai/dsh-paimon-task-runtime':
+        specifier: workspace:*
+        version: link:../task-runtime
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:~
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-paimon-task-harness':
+        specifier: workspace:*
+        version: link:../task-runtime-harness
+
   packages/paimon/task-runtime:
     devDependencies:
       '@deepseek-ai/cordis':
@@ -12841,9 +12857,15 @@ importers:
 
   packages/paimon/task-runtime-harness:
     dependencies:
+      '@deepseek-ai/dsh-home-paths':
+        specifier: workspace:*
+        version: link:../../util/home-paths
       '@deepseek-ai/dsh-paimon-task-runtime':
         specifier: workspace:*
         version: link:../task-runtime
+      '@deepseek-ai/dsh-paimon-task-store-file':
+        specifier: workspace:*
+        version: link:../task-store-file
       '@deepseek-ai/schemastery':
         specifier: link:../../../vendor/schemastery
         version: link:../../../vendor/schemastery
@@ -12878,6 +12900,16 @@ importers:
       '@deepseek-ai/dsh-user-approval':
         specifier: workspace:*
         version: link:../../interaction/user-approval
+
+  packages/paimon/task-store-file:
+    dependencies:
+      '@deepseek-ai/dsh-paimon-task-runtime':
+        specifier: workspace:*
+        version: link:../task-runtime
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:~
+        version: link:../../../vendor/cordis
 
   packages/paimon/tool-paimon-task:
     dependencies:

@@ -521,3 +521,20 @@ describe('task runtime: relative paths', () => {
     expect(runtime.gateToolCall(task.id, { toolId: 'fs_read', path: '../escape.ts' }).kind).toBe('deny')
   })
 })
+
+describe('task runtime: deadline input validation', () => {
+  it('rejects a zero or negative budget instead of timing out at once', () => {
+    // `deadlineMs: 0` reads like "no limit" but compares as "already spent":
+    // the first gate call after start would close the task before it worked.
+    const { runtime } = harness()
+    expect(() => runtime.createTask({ goal: 'job', deadlineMs: 0 })).toThrow(RangeError)
+    expect(() => runtime.createTask({ goal: 'job', deadlineMs: -1 })).toThrow(/positive/)
+    expect(runtime.listTasks()).toEqual([])
+  })
+
+  it('accepts a positive budget and treats an omitted one as unlimited', () => {
+    const { runtime } = harness()
+    expect(runtime.createTask({ goal: 'a', deadlineMs: 1 }).deadlineMs).toBe(1)
+    expect(runtime.createTask({ goal: 'b' }).deadlineMs).toBeUndefined()
+  })
+})

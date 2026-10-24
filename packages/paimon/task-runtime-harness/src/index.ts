@@ -189,6 +189,10 @@ export class PaimonTaskService extends Service {
       workspace: input.workspace,
       deadlineMs,
       rules: input.rules,
+      // Passed through explicitly: the adapter has no other chance to do it, and
+      // dropping this silently leaves the task with no completion conditions —
+      // which the model cannot tell apart from "the work is not done yet".
+      ruleSpecs: input.ruleSpecs,
       retryPolicy: input.retryPolicy,
     })
   }
