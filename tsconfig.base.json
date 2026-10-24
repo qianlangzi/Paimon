@@ -31,6 +31,7 @@
       "@deepseek-ai/dsh-paimon-task-harness": ["./packages/paimon/task-runtime-harness/src/index.ts"],
       "@deepseek-ai/dsh-paimon-task-runtime": ["./packages/paimon/task-runtime/src/index.ts"],
       "@deepseek-ai/dsh-paimon-task-store-file": ["./packages/paimon/task-store-file/src/index.ts"],
+      "@deepseek-ai/dsh-paimon-controller": ["./packages/paimon/paimon-controller/src/index.ts"],
       "@deepseek-ai/dsh-tool-paimon-task": ["./packages/paimon/tool-paimon-task/src/index.ts"],
       "@deepseek-ai/dsh-client-ui-entry-customization": ["./packages/client/ui-entry-customization/src/index.ts"],
       "@deepseek-ai/dsh-client-ui-entry-customization/client": ["./packages/client/ui-entry-customization/src/client/index.ts"],
