@@ -331,6 +331,22 @@ export class TaskRuntime {
   // ----------------------------------------------------------------- settling
 
   /**
+   * Evaluates the completion conditions without settling the run.
+   *
+   * Exists so a caller can ask "would this pass?" and keep working when the
+   * answer is no. Without it, the only way to find out is to settle, and a
+   * failing settlement closes the run — a coding agent that checks too early
+   * would kill its own task.
+   *
+   * @throws ApprovalPendingError while a human decision is outstanding.
+   */
+  checkCompletion(taskId: string, evidence: readonly Evidence[]): ValidationReport {
+    const task = this.#requireTask(taskId)
+    if (task.status === 'WAITING_APPROVAL') throw new ApprovalPendingError(task.id)
+    return new ResultValidator(this.#rules.get(task.id) ?? []).validate(evidence)
+  }
+
+  /**
    * Settles the active run by validating the evidence it produced.
    *
    * A passing report ends the task as `SUCCEEDED`. A failing report ends the

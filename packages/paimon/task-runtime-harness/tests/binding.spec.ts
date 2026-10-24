@@ -118,6 +118,28 @@ describe('bindings: gating', () => {
     const { bindings, agent } = harness()
     expect(bindings.resolveApproval(agent, true)).toBeUndefined()
   })
+
+  it('stops governing once the task reaches a terminal state', () => {
+    const { bindings, runtime, agent, task } = harness()
+    runtime.startRun(task.id)
+    bindings.recordToolOutcome(agent, {
+      callId: 'c1',
+      toolName: 'run_tests',
+      result: { isError: false },
+      testTools: ['run_tests'],
+    })
+    runtime.completeRun(task.id, bindings.evidenceOf(agent), 'done')
+
+    // A finished task must not lock the agent out of its remaining session.
+    expect(bindings.gate(agent, { toolId: 'bash', path: resolve('/etc/passwd') })).toBeUndefined()
+    expect(bindings.recordToolOutcome(agent, {
+      callId: 'c2',
+      toolName: 'bash',
+      result: { isError: false },
+    })).toEqual([])
+    // The task is still queryable; only its governance ended.
+    expect(bindings.taskOf(agent)?.status).toBe('SUCCEEDED')
+  })
 })
 
 describe('bindings: evidence', () => {

@@ -392,3 +392,35 @@ describe('task runtime: guards', () => {
     expect(runtime.completeRun(task.id, [passingTests], 'done').kind).toBe('succeeded')
   })
 })
+
+describe('task runtime: completion probing', () => {
+  it('reports a failing condition without closing the run', () => {
+    const { runtime } = harness()
+    const task = runtime.createTask({ goal: 'job', rules: [rule] })
+    runtime.startRun(task.id)
+
+    const report = runtime.checkCompletion(task.id, [failingTests])
+    expect(report.satisfied).toBe(false)
+    // Probing must not settle: a model that checks too early keeps working.
+    expect(runtime.getTask(task.id).status).toBe('RUNNING')
+    expect(runtime.getTask(task.id).currentRunId).toBeDefined()
+  })
+
+  it('reports a passing condition without settling either', () => {
+    const { runtime } = harness()
+    const task = runtime.createTask({ goal: 'job', rules: [rule] })
+    runtime.startRun(task.id)
+
+    expect(runtime.checkCompletion(task.id, [passingTests]).satisfied).toBe(true)
+    expect(runtime.getTask(task.id).status).toBe('RUNNING')
+  })
+
+  it('agrees with the settlement that follows it', () => {
+    const { runtime } = harness()
+    const task = runtime.createTask({ goal: 'job', rules: [rule] })
+    runtime.startRun(task.id)
+
+    expect(runtime.checkCompletion(task.id, [passingTests]).satisfied).toBe(true)
+    expect(runtime.completeRun(task.id, [passingTests], 'done').kind).toBe('succeeded')
+  })
+})

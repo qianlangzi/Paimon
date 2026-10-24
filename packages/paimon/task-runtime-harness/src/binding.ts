@@ -6,6 +6,7 @@ import type {
   ToolGateDecision,
   ToolGateRequest,
 } from '@deepseek-ai/dsh-paimon-task-runtime'
+import { isTerminalTaskStatus } from '@deepseek-ai/dsh-paimon-task-runtime'
 import { type EvidenceInput, extractEvidence } from './evidence.ts'
 
 /**
@@ -89,12 +90,16 @@ export class TaskBindings {
   /**
    * Gates one tool call.
    *
-   * @returns `undefined` when the agent is unmanaged, meaning "no opinion —
-   * delegate unchanged". A defined decision is authoritative.
+   * @returns `undefined` when the agent is unmanaged **or its task already
+   * finished**, meaning "no opinion — delegate unchanged". A finished task
+   * stops governing the session, so the agent can keep using tools for
+   * whatever the user asks next instead of being locked out by a closed task.
+   * A defined decision is authoritative.
    */
   gate(agent: AgentRef, request: ToolGateRequest): ToolGateDecision | undefined {
     const taskId = this.#taskByAgent.get(agent.id)
     if (taskId === undefined) return undefined
+    if (isTerminalTaskStatus(this.#runtime.getTask(taskId).status)) return undefined
     return this.#runtime.gateToolCall(taskId, request)
   }
 
@@ -116,11 +121,13 @@ export class TaskBindings {
    * Records a tool outcome and appends the evidence it produced.
    *
    * @returns the evidence added, so a caller can log or inspect it; empty when
-   * the agent is unmanaged.
+   * the agent is unmanaged or its task already finished (a closed task takes
+   * no further evidence).
    */
   recordToolOutcome(agent: AgentRef, input: EvidenceInput): readonly Evidence[] {
     const taskId = this.#taskByAgent.get(agent.id)
     if (taskId === undefined) return []
+    if (isTerminalTaskStatus(this.#runtime.getTask(taskId).status)) return []
     const evidence = extractEvidence(input)
     this.#evidenceByTask.get(taskId)?.push(...evidence)
     this.#runtime.recordToolResult(

@@ -12861,6 +12861,22 @@ importers:
         specifier: workspace:*
         version: link:../../interaction/user-approval
 
+  packages/paimon/tool-paimon-task:
+    dependencies:
+      '@deepseek-ai/dsh-paimon-task-harness':
+        specifier: workspace:*
+        version: link:../task-runtime-harness
+      '@deepseek-ai/dsh-paimon-task-runtime':
+        specifier: workspace:*
+        version: link:../task-runtime
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:~
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-tools':
+        specifier: workspace:*
+        version: link:../../core/tools
+
   packages/plan/plan-mode:
     dependencies:
       '@deepseek-ai/dsh-brand':

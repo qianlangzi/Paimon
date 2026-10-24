@@ -31,6 +31,14 @@ import { TaskBindings, type AgentRef } from './binding.ts'
 import { type ResolvedApproval, approvalToResolved, toPreToolDecision } from './mapping.ts'
 import { DEFAULT_PATH_ARGUMENT_KEYS, extractPathArgument } from './path-args.ts'
 
+// The adapter's pieces are useful on their own: other plugins query bindings,
+// tests drive them without a context, and an embedder may want the pure
+// mapping helpers. Re-exporting keeps a single import path.
+export { TaskBindings, type AgentRef, type TaskBinding } from './binding.ts'
+export { type ToolResultLike, type EvidenceInput, extractEvidence } from './evidence.ts'
+export { type ResolvedApproval, approvalToResolved, toPreToolDecision } from './mapping.ts'
+export { DEFAULT_PATH_ARGUMENT_KEYS, extractPathArgument } from './path-args.ts'
+
 declare module '@deepseek-ai/cordis' {
   interface Context {
     /** Task governance over the harness tool pipeline. */
