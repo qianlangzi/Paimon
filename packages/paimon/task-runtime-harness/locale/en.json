@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "paimon-task-harness",
+    "description": "Binds Paimon tasks to harness agents and routes the tool pipeline, approval seam and cancellation through the task governance layer."
+  }
+}

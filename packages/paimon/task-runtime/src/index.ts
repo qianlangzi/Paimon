@@ -21,6 +21,7 @@ export {
 } from './clock.ts'
 
 export {
+  ApprovalPendingError,
   InvalidTransitionError,
   TaskClosedError,
   TaskNotFoundError,

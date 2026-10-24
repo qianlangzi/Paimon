@@ -28,6 +28,7 @@
     // not declaration path aliases, keep each package/vendor source compiled
     // under its own tsconfig boundary.
     "paths": {
+      "@deepseek-ai/dsh-paimon-task-harness": ["./packages/paimon/task-runtime-harness/src/index.ts"],
       "@deepseek-ai/dsh-paimon-task-runtime": ["./packages/paimon/task-runtime/src/index.ts"],
       "@deepseek-ai/dsh-client-ui-entry-customization": ["./packages/client/ui-entry-customization/src/index.ts"],
       "@deepseek-ai/dsh-client-ui-entry-customization/client": ["./packages/client/ui-entry-customization/src/client/index.ts"],

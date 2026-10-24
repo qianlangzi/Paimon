@@ -422,6 +422,7 @@
     { "path": "./packages/experimental/claude-code-mods" },
     { "path": "./packages/core/tools" },
     { "path": "./packages/paimon/task-runtime" },
+    { "path": "./packages/paimon/task-runtime-harness" },
     { "path": "./packages/core/tool-executor-native" },
     { "path": "./packages/core/tool-executor-ptc" },
     { "path": "./packages/core/agent-tool-presentation" },

@@ -51,3 +51,21 @@ export class TaskNotFoundError extends Error {
     this.name = 'TaskNotFoundError'
   }
 }
+
+/**
+ * Raised when a run is settled while a human decision is still pending.
+ *
+ * PRD 5.2 pauses the execution flow at an approval, so settling a run during
+ * that pause is an ordering mistake by the caller. It is reported as its own
+ * error rather than an {@link InvalidTransitionError} because nothing illegal
+ * happened — the caller simply has to resolve the approval first.
+ *
+ * The alternative, silently withdrawing the pending approval, would be worse:
+ * the task could then report success for an operation that never ran.
+ */
+export class ApprovalPendingError extends Error {
+  constructor(readonly taskId: string) {
+    super(`task ${taskId} is waiting for an approval decision; resolve it before settling the run`)
+    this.name = 'ApprovalPendingError'
+  }
+}

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { type Clock, systemClock, toIso } from './clock.ts'
-import { TaskClosedError, TaskNotFoundError, taskError } from './errors.ts'
+import { ApprovalPendingError, TaskClosedError, TaskNotFoundError, taskError } from './errors.ts'
 import { redactRecord } from './redaction.ts'
 import { DEFAULT_RETRY_POLICY, decideRetry, type RetryPolicy } from './retry-policy.ts'
 import { assertRunTransition, assertTaskTransition } from './state-machine.ts'
@@ -578,6 +578,10 @@ export class TaskRuntime {
   }
 
   #requireActiveRun(task: Task): Run {
+    if (task.status === 'WAITING_APPROVAL') {
+      // The flow is paused for a human decision; a run cannot settle yet.
+      throw new ApprovalPendingError(task.id)
+    }
     if (task.currentRunId === undefined) {
       throw new Error(`task ${task.id} has no active run`)
     }

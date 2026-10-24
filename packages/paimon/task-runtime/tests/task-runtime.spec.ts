@@ -1,6 +1,7 @@
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
+  ApprovalPendingError,
   TaskClosedError,
   TaskNotFoundError,
   TaskRuntime,
@@ -366,5 +367,28 @@ describe('task runtime: guards', () => {
     const task = runtime.createTask({ goal: 'job' })
     runtime.startRun(task.id)
     expect(() => runtime.resolveApproval(task.id, true)).toThrow(/not WAITING_APPROVAL/)
+  })
+
+  it('refuses to settle a run while an approval is still pending', () => {
+    const { runtime } = harness()
+    const task = runtime.createTask({ goal: 'job', rules: [rule] })
+    runtime.startRun(task.id)
+    runtime.gateToolCall(task.id, { toolId: 'rm', requiresApproval: true })
+
+    // Settling now would have to invent the approval outcome. It refuses with
+    // a named error instead of silently withdrawing the pending decision.
+    expect(() => runtime.completeRun(task.id, [passingTests], 'done')).toThrow(ApprovalPendingError)
+    expect(() => runtime.failRun(task.id, taskError('tool', 'boom'))).toThrow(ApprovalPendingError)
+    expect(runtime.getTask(task.id).status).toBe('WAITING_APPROVAL')
+  })
+
+  it('settles normally once the pending approval is resolved', () => {
+    const { runtime } = harness()
+    const task = runtime.createTask({ goal: 'job', rules: [rule] })
+    runtime.startRun(task.id)
+    runtime.gateToolCall(task.id, { toolId: 'rm', requiresApproval: true })
+    runtime.resolveApproval(task.id, true)
+
+    expect(runtime.completeRun(task.id, [passingTests], 'done').kind).toBe('succeeded')
   })
 })
