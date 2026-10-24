@@ -1,0 +1,21 @@
+# Paimon profile overlay.
+#
+# Applied on top of a stock dsh profile with `--patch`:
+#
+#   dsh --profile paimon headless --patch packages/paimon/profile/cordis.patch.yml "<goal>"
+#
+# It inserts the task governance layer after the stock rows. The adapter has to
+# be mounted before the model-facing tools, because the tools inject the
+# `paimonTasks` service it provides; Cordis keeps the tool plugin waiting until
+# that service exists, so the order here is a readability choice rather than a
+# correctness requirement.
+- insert:
+    - id: paimon-task-harness
+      name: '@deepseek-ai/dsh-paimon-task-harness'
+      config:
+        # The test runner is not named here: until a deployment declares its
+        # own, a `tests` task stays unverifiable, which is the honest default.
+        testTools: []
+        approvalTools: []
+    - id: tool-paimon-task
+      name: '@deepseek-ai/dsh-tool-paimon-task'
