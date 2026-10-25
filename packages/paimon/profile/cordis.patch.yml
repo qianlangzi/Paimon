@@ -32,6 +32,20 @@
         # The test runner is not named here: until a deployment declares its
         # own, a `tests` task stays unverifiable, which is the honest default.
         testTools: []
+        # Deliberately empty, and NOT because nothing needs a decision.
+        #
+        # `approval/request` is answered by a composed answerer, and this
+        # profile has none: `headless` (our template) mounts neither `acp` nor
+        # the browser client, so an ask here resolves `unavailable` and every
+        # gated call fails closed — the agent would lose the shell entirely.
+        # Naming a tool in this list without an answerer behind it is not
+        # "more secure", it is "nothing runs".
+        #
+        # Fill it in a profile that does compose an answerer (`acp` for the
+        # desktop app, `client-ui-approval` in web-app), where the decision has
+        # somewhere to go. When that happens, the request already carries the
+        # task's goal and attempt (`approvalContextOf`), so the card asks a
+        # question a human can actually answer.
         approvalTools: []
         # Keep tasks under `$DSH_HOME/paimon/tasks` so a restart can still show
         # what the agent was doing. Off in code, on here: a library consumer or
