@@ -16,6 +16,7 @@ import { chromium } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
 import type {} from '@deepseek-ai/dsh-paimon-task-harness'
 import type {} from '@deepseek-ai/dsh-paimon-controller'
+import { taskError } from '@deepseek-ai/dsh-paimon-task-runtime'
 import { launchWebScaffold, watchConsole, type WebScaffold } from './scaffold.ts'
 import { connectFreshWorkspace, newEnglishPage, saveFailureShot } from './support.ts'
 
@@ -34,6 +35,8 @@ const INSTALL_ANCHORS = [
 const RUNNING_GOAL = 'E2E: one task that is still running'
 /** Goal of the task that exists only to prove the count is read, not assumed. */
 const PENDING_GOAL = 'E2E: a second task in the list'
+/** Goal of the task whose first attempt failed and was retried. */
+const RETRIED_GOAL = 'E2E: an attempt that failed and was retried'
 
 describe('web e2e: paimon task strip', () => {
   let scaffold: WebScaffold
@@ -97,6 +100,45 @@ describe('web e2e: paimon task strip', () => {
 
     // The dock is shared with other surfaces; a React error here would be a
     // broken conversation, not a broken strip.
+    expect(tripwire.pageErrors).toEqual([])
+    expect(tripwire.warnings).toEqual([])
+  })
+
+  it('explains a retried attempt on the diagnostics tab', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-paimon-diagnostics'))
+
+    // Driven on the Host, not through a model: the verdict under test is the
+    // one the retry policy wrote down, and producing it with a real model would
+    // make the assertion depend on the model's behaviour.
+    const task = scaffold.ctx.paimonTasks.bind(
+      { id: 'e2e-retried-agent' },
+      { goal: RETRIED_GOAL, workspace: scaffold.workspaceCwd, deadlineMs: 600_000 },
+    )
+    scaffold.ctx.paimonTasks.runtime.startRun(task.id)
+    scaffold.ctx.paimonTasks.runtime.failRun(task.id, taskError('tool', 'the tool exited 1'))
+    scaffold.ctx.paimonTasks.runtime.startRun(task.id)
+
+    await page.getByTitle('Refresh tasks').click()
+    const chip = page.locator(`button[title="${RETRIED_GOAL}"]`)
+    await expect.poll(() => chip.count(), { timeout: 15_000 }).toBe(1)
+    await chip.click()
+
+    const detail = page.locator('[data-testid="paimon-task-detail"]')
+    await detail.waitFor({ timeout: 10_000 })
+    await detail.getByRole('tab', { name: 'diagnostics' }).click()
+
+    const diag = page.getByTestId('paimon-task-diagnostics')
+    await diag.waitFor({ timeout: 10_000 })
+    // The budget is the resolved one (three attempts), spent two, so one left.
+    await expect.poll(() => diag.getByText('attempt budget 2/3').count()).toBe(1)
+    await expect.poll(() => diag.getByText('1 attempt(s) left').count()).toBe(1)
+    // The verdict of the failed attempt, and the runtime's own sentence for it.
+    await expect.poll(() => diag.getByText('retried').count()).toBe(1)
+    await expect.poll(() => diag.getByText(/is retryable and budget remains/).count()).toBe(1)
+    // The boundary the tools were held to, and the budget's expiry instant.
+    await expect.poll(() => diag.getByText(`boundary ${scaffold.workspaceCwd}`).count()).toBe(1)
+    await expect.poll(() => diag.getByText(/^deadline \d{4}-\d{2}-\d{2}/).count()).toBe(1)
+
     expect(tripwire.pageErrors).toEqual([])
     expect(tripwire.warnings).toEqual([])
   })

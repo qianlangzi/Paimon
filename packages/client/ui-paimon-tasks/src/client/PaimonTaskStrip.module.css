@@ -106,6 +106,53 @@
   align-self: center;
 }
 
+/* A failed poll with rows still on screen: the marker is a hint, not a banner —
+   it must not push the chips around or shout louder than the tasks. */
+.stale {
+  font-size: 11px;
+  color: var(--dsh-danger, #b91c1c);
+  opacity: 0.75;
+  white-space: nowrap;
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin: 2px 0 4px;
+}
+
+.tab {
+  border: none;
+  background: none;
+  cursor: pointer;
+  padding: 0 6px 2px;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsh-text-secondary, #9ca3af);
+  border-bottom: 2px solid transparent;
+}
+
+.tab[data-active='true'] {
+  color: var(--dsh-text-primary, #111827);
+  border-bottom-color: var(--dsh-accent, #2563eb);
+}
+
+.diagRow {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+  padding: 2px 0;
+}
+
+/* The runtime's own sentence: it wraps, because truncating the explanation is
+   the same as not having one. */
+.diagReason {
+  color: var(--dsh-text-secondary, #6b7280);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
 .detail {
   margin: 0 8px 6px;
   padding: 8px;

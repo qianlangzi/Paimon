@@ -19,6 +19,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { RunDto, TaskDetailDto, TaskRowDto } from '@deepseek-ai/dsh-paimon-controller/types'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { PaimonTaskStripInjected } from './slots.ts'
+import { RunDiagnostics } from './RunDiagnostics.tsx'
 import css from './PaimonTaskStrip.module.css'
 
 /** How often the strip re-reads the task list, in milliseconds. */
@@ -40,6 +41,9 @@ export interface PaimonTaskStripProps extends PaimonTaskStripInjected {
   /** Poll interval override, for tests. */
   refreshIntervalMs?: number
 }
+
+/** Which half of the detail panel is showing. */
+type DetailTab = 'record' | 'diagnostics'
 
 /** Counts the statuses the strip calls out. */
 function summarise(rows: readonly TaskRowDto[]) {
@@ -70,10 +74,20 @@ export function PaimonTaskStrip({
   const [rows, setRows] = useState<readonly TaskRowDto[] | undefined>(undefined)
   const [error, setError] = useState<string | undefined>(undefined)
   const [openId, setOpenId] = useState<string | undefined>(undefined)
+  const [tab, setTab] = useState<DetailTab>('record')
   const [detail, setDetail] = useState<TaskDetailDto | undefined>(undefined)
   const [detailError, setDetailError] = useState<string | undefined>(undefined)
   const [detailBusy, setDetailBusy] = useState(false)
   const mounted = useRef(true)
+  /**
+   * Identifies the newest detail request.
+   *
+   * Opening a second task before the first read settles is normal, and both
+   * promises then resolve in whatever order the transport gives. Without a
+   * ticket the loser overwrites the winner and the panel shows task A's record
+   * under task B's chip.
+   */
+  const detailTicket = useRef(0)
 
   const read = useCallback(async () => {
     const result = await load()
@@ -104,10 +118,15 @@ export function PaimonTaskStrip({
   const refresh = useCallback(() => { void read().catch(() => {}) }, [read])
 
   const openTask = useCallback((taskId: string) => {
+    // Closing is a request too: a read still in flight must not reopen the
+    // panel the reader just dismissed.
+    const ticket = detailTicket.current += 1
+    setTab('record')
     if (openId === taskId) {
       setOpenId(undefined)
       setDetail(undefined)
       setDetailError(undefined)
+      setDetailBusy(false)
       return
     }
     setOpenId(taskId)
@@ -116,20 +135,24 @@ export function PaimonTaskStrip({
     setDetailBusy(true)
     void loadDetail(taskId, DETAIL_EVENT_LIMIT)
       .then((result) => {
-        if (!mounted.current) return
+        if (!mounted.current || ticket !== detailTicket.current) return
         if (result.ok) setDetail(result.value)
         else setDetailError(result.error.message)
       })
       .catch((cause: unknown) => {
-        if (!mounted.current) return
+        if (!mounted.current || ticket !== detailTicket.current) return
         setDetailError(cause instanceof Error ? cause.message : String(cause))
       })
       .finally(() => {
-        if (mounted.current) setDetailBusy(false)
+        if (mounted.current && ticket === detailTicket.current) setDetailBusy(false)
       })
   }, [loadDetail, openId])
 
-  if (error !== undefined) {
+  // A failed poll only replaces the strip when there is nothing to keep: a
+  // transient transport error must not erase a list the reader was using. With
+  // rows in hand the error becomes a marker beside them.
+  if (rows === undefined || rows.length === 0) {
+    if (error === undefined) return null
     return (
       <div className={css.strip} data-state="error">
         <span className={css.error}>{t('strip.error', { message: error })}</span>
@@ -139,7 +162,6 @@ export function PaimonTaskStrip({
       </div>
     )
   }
-  if (rows === undefined || rows.length === 0) return null
 
   const { total, running, waiting } = summarise(rows)
   const visible = rows.slice(0, MAX_CHIPS)
@@ -151,6 +173,9 @@ export function PaimonTaskStrip({
         <span className={css.count}>{t('strip.count', { count: total })}</span>
         {running > 0 && <span className={css.running}>{t('strip.running', { count: running })}</span>}
         {waiting > 0 && <span className={css.waiting}>{t('strip.waiting', { count: waiting })}</span>}
+        {error !== undefined && (
+          <span className={css.stale} title={t('strip.error', { message: error })}>{t('strip.stale')}</span>
+        )}
         <button type="button" className={css.refresh} onClick={refresh} title={t('strip.refresh')}>
           ↻
         </button>
@@ -195,49 +220,78 @@ export function PaimonTaskStrip({
                 </button>
               </div>
 
-              {detail.runs.length > 0 && (
-                <div className={css.block}>
-                  <div className={css.blockTitle}>{t('detail.runs')}</div>
-                  {detail.runs.map(run => (
-                    <div key={run.id} className={css.row}>
-                      <span data-status={run.status}>{runLabel(run, t)}</span>
-                      {run.resultSummary !== undefined && (
-                        <span className={css.muted}>{run.resultSummary}</span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {detail.validation !== undefined && (
-                <div className={css.block}>
-                  <div className={css.blockTitle}>
-                    {t('detail.checks')}
-                    {' · '}
-                    {detail.validation.satisfied ? t('detail.verified') : t('detail.unverified')}
-                  </div>
-                  {detail.validation.checks.map(check => (
-                    <div key={check.id} className={css.row}>
-                      <span data-outcome={check.outcome}>{check.description}</span>
-                      <span className={css.muted}>
-                        {check.outcome}
-                        {check.note === undefined ? '' : ` — ${check.note}`}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <div className={css.block}>
-                <div className={css.blockTitle}>{t('detail.timeline')}</div>
-                {detail.events.length === 0 && <div className={css.muted}>{t('detail.empty')}</div>}
-                {detail.events.slice(-VISIBLE_EVENTS).map((event, index) => (
-                  <div key={`${event.timestamp}-${index}`} className={css.row}>
-                    <span className={css.eventType}>{event.type}</span>
-                    <span className={css.muted}>{event.timestamp.replace('T', ' ').replace('Z', '')}</span>
-                  </div>
-                ))}
+              <div className={css.tabs} role="tablist">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === 'record'}
+                  className={css.tab}
+                  data-active={tab === 'record' ? 'true' : undefined}
+                  onClick={() => setTab('record')}
+                >
+                  {t('detail.tab.record')}
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === 'diagnostics'}
+                  className={css.tab}
+                  data-active={tab === 'diagnostics' ? 'true' : undefined}
+                  onClick={() => setTab('diagnostics')}
+                >
+                  {t('detail.tab.diagnostics')}
+                </button>
               </div>
+
+              {tab === 'diagnostics' ? (
+                <RunDiagnostics detail={detail} t={t} />
+              ) : (
+                <>
+                  {detail.runs.length > 0 && (
+                    <div className={css.block}>
+                      <div className={css.blockTitle}>{t('detail.runs')}</div>
+                      {detail.runs.map(run => (
+                        <div key={run.id} className={css.row}>
+                          <span data-status={run.status}>{runLabel(run, t)}</span>
+                          {run.resultSummary !== undefined && (
+                            <span className={css.muted}>{run.resultSummary}</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {detail.validation !== undefined && (
+                    <div className={css.block}>
+                      <div className={css.blockTitle}>
+                        {t('detail.checks')}
+                        {' · '}
+                        {detail.validation.satisfied ? t('detail.verified') : t('detail.unverified')}
+                      </div>
+                      {detail.validation.checks.map(check => (
+                        <div key={check.id} className={css.row}>
+                          <span data-outcome={check.outcome}>{check.description}</span>
+                          <span className={css.muted}>
+                            {check.outcome}
+                            {check.note === undefined ? '' : ` — ${check.note}`}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className={css.block}>
+                    <div className={css.blockTitle}>{t('detail.timeline')}</div>
+                    {detail.events.length === 0 && <div className={css.muted}>{t('detail.empty')}</div>}
+                    {detail.events.slice(-VISIBLE_EVENTS).map((event, index) => (
+                      <div key={`${event.timestamp}-${index}`} className={css.row}>
+                        <span className={css.eventType}>{event.type}</span>
+                        <span className={css.muted}>{event.timestamp.replace('T', ' ').replace('Z', '')}</span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
             </>
           )}
         </div>

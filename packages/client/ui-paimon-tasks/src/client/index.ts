@@ -28,6 +28,8 @@ export { PaimonTaskStrip } from './PaimonTaskStrip.tsx'
 export type { PaimonTaskStripProps } from './PaimonTaskStrip.tsx'
 export type { PaimonTaskStripInjected } from './slots.ts'
 export { REFRESH_INTERVAL_MS } from './PaimonTaskStrip.tsx'
+export { RunDiagnostics, attemptsLeft } from './RunDiagnostics.tsx'
+export type { RunDiagnosticsProps } from './RunDiagnostics.tsx'
 
 /** Required services: the dock slot, the generated namespace, and copy. */
 export const inject = ['slots', 'remote', 'remote.paimonTask', 'locale', 'uiConversation']

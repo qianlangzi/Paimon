@@ -40,6 +40,8 @@ function detail(over: Partial<TaskDetailDto> = {}): TaskDetailDto {
       timedOut: false,
       errorKind: 'tool',
       resultSummary: 'first attempt',
+      retryDecision: 'retry',
+      retryReason: 'failure kind "tool" is retryable and budget remains (1/3)',
     }],
     events: [
       { type: 'task/created', timestamp: '2026-10-25T05:00:00.000Z', data: {} },
@@ -49,6 +51,7 @@ function detail(over: Partial<TaskDetailDto> = {}): TaskDetailDto {
       satisfied: false,
       checks: [{ id: 'tests', description: 'the tests pass', outcome: 'not-checked', note: 'no report' }],
     },
+    retry: { maxAttempts: 3, retryableKinds: ['model', 'tool', 'internal'] },
     ...over,
   }
 }
@@ -132,6 +135,21 @@ describe('PaimonTaskStrip', () => {
     render(<PaimonTaskStrip load={load} loadDetail={makeLoadDetail()} t={t} />)
     expect(await screen.findByText('任务读取失败：gateway closed')).toBeTruthy()
   })
+
+  it('keeps the list a reader is using when a later poll fails', async () => {
+    // A poll runs every 15 s; one transport hiccup must not erase the tasks.
+    const load = vi.fn<PaimonTaskStripInjected['load']>()
+      .mockResolvedValueOnce({ ok: true, value: [row()] })
+      .mockResolvedValue({ ok: false, error: { code: 'unavailable', message: 'host offline' } as never })
+
+    render(<PaimonTaskStrip load={load} loadDetail={makeLoadDetail()} t={t} refreshIntervalMs={10} />)
+    expect(await screen.findByText('1 个运行中')).toBeTruthy()
+
+    expect(await screen.findByText('本次刷新失败')).toBeTruthy()
+    // The rows survived: the count and the chip are still there.
+    expect(screen.getByText('1 个任务')).toBeTruthy()
+    expect(screen.getByTitle('fix the failing test')).toBeTruthy()
+  })
 })
 
 describe('PaimonTaskStrip detail', () => {
@@ -197,5 +215,86 @@ describe('PaimonTaskStrip detail', () => {
     )
     fireEvent.click(await screen.findByTitle('fix the failing test'))
     expect(await screen.findByText('暂无记录')).toBeTruthy()
+  })
+
+  it('ignores a slow detail read for a task the reader has already left', async () => {
+    // Two clicks, two in-flight reads, and the transport answers the first one
+    // last. Without a ticket the panel ends up showing task A under task B.
+    type DetailResult = Awaited<ReturnType<PaimonTaskStripInjected['loadDetail']>>
+    const pending: Array<(result: DetailResult) => void> = []
+    const loadDetail = vi.fn<PaimonTaskStripInjected['loadDetail']>(
+      () => new Promise<DetailResult>((resolve) => { pending.push(resolve) }),
+    )
+    const rows = [row({ id: 'a', goal: 'task a' }), row({ id: 'b', goal: 'task b' })]
+
+    render(<PaimonTaskStrip load={makeLoad(rows)} loadDetail={loadDetail} t={t} />)
+    fireEvent.click(await screen.findByTitle('task a'))
+    fireEvent.click(screen.getByTitle('task b'))
+
+    pending[1]?.({ ok: true, value: detail({ id: 'b', goal: 'task b' }) })
+    await waitFor(() => {
+      expect(screen.getByTestId('paimon-task-detail').textContent).toContain('task b')
+    })
+
+    pending[0]?.({ ok: true, value: detail({ id: 'a', goal: 'task a' }) })
+    // `waitFor` flushes the state update the stale promise would have queued,
+    // so this asserts on what a reader would actually see rather than on the
+    // microtask order of the test.
+    await waitFor(() => {
+      expect(screen.getByTestId('paimon-task-detail').textContent).toContain('task b')
+    })
+    expect(screen.getByTestId('paimon-task-detail').textContent).not.toContain('task a')
+  })
+})
+
+describe('PaimonTaskStrip diagnostics', () => {
+  it('shows the retry budget, the verdict of each attempt and the boundary', async () => {
+    render(<PaimonTaskStrip load={makeLoad([row()])} loadDetail={makeLoadDetail()} t={t} />)
+    fireEvent.click(await screen.findByTitle('fix the failing test'))
+    fireEvent.click(await screen.findByRole('tab', { name: '诊断' }))
+
+    const panel = screen.getByTestId('paimon-task-diagnostics')
+    expect(panel.textContent).toContain('尝试预算 1/3')
+    expect(panel.textContent).toContain('还剩 2 次')
+    expect(panel.textContent).toContain('可重试：model, tool, internal')
+    expect(panel.textContent).toContain('已重试')
+    expect(panel.textContent).toContain('failure kind "tool" is retryable')
+    expect(panel.textContent).toContain('边界目录 /repo/project')
+    expect(panel.textContent).toContain('第 1 次尝试 · FAILED · 1.0 秒')
+    // The record tab is swapped out, not stacked underneath.
+    expect(screen.queryByText('时间线')).toBeNull()
+  })
+
+  it('says a budget is spent rather than showing a negative remainder', async () => {
+    render(
+      <PaimonTaskStrip
+        load={makeLoad([row({ attempt: 3, status: 'FAILED' })])}
+        loadDetail={makeLoadDetail({ ok: true, value: detail({ attempt: 3, status: 'FAILED' }) })}
+        t={t}
+      />,
+    )
+    fireEvent.click(await screen.findByTitle('fix the failing test'))
+    fireEvent.click(await screen.findByRole('tab', { name: '诊断' }))
+
+    const panel = screen.getByTestId('paimon-task-diagnostics')
+    expect(panel.textContent).toContain('尝试预算 3/3')
+    expect(panel.textContent).toContain('尝试预算已用尽')
+    expect(panel.textContent).not.toContain('还剩')
+  })
+
+  it('reports a missing deadline instead of an empty one', async () => {
+    render(<PaimonTaskStrip load={makeLoad([row()])} loadDetail={makeLoadDetail()} t={t} />)
+    fireEvent.click(await screen.findByTitle('fix the failing test'))
+    fireEvent.click(await screen.findByRole('tab', { name: '诊断' }))
+    expect(screen.getByTestId('paimon-task-diagnostics').textContent).toContain('截止时间 未设时间预算')
+  })
+
+  it('goes back to the record when the record tab is chosen again', async () => {
+    render(<PaimonTaskStrip load={makeLoad([row()])} loadDetail={makeLoadDetail()} t={t} />)
+    fireEvent.click(await screen.findByTitle('fix the failing test'))
+    fireEvent.click(await screen.findByRole('tab', { name: '诊断' }))
+    fireEvent.click(screen.getByRole('tab', { name: '记录' }))
+    expect(await screen.findByText('时间线')).toBeTruthy()
+    expect(screen.queryByTestId('paimon-task-diagnostics')).toBeNull()
   })
 })
