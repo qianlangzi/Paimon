@@ -48,6 +48,15 @@ export interface TaskRowDto {
   readonly outcome?: TaskOutcomeDto
   /** Present only when the task declares a budget. */
   readonly deadlineMs?: number
+  /**
+   * The instant the budget runs out, when the task has both started and
+   * declared one.
+   *
+   * Absolute rather than "milliseconds remaining": the remaining time depends
+   * on when a view happens to render, and a browser must not have to guess the
+   * host's clock.
+   */
+  readonly deadlineAt?: string
 }
 
 /** One attempt in the detail view. */
@@ -61,6 +70,15 @@ export interface RunDto {
   /** Failure class, when the run failed; no message here, that is the event log. */
   readonly errorKind?: string
   readonly resultSummary?: string
+  /**
+   * What the retry policy decided after this attempt failed: `retry` or `stop`.
+   *
+   * Read from the `run/ended` event rather than recomputed, so the view shows
+   * the decision that was actually taken, not one it would have taken.
+   */
+  readonly retryDecision?: string
+  /** Why that decision was taken, in the runtime's own words. */
+  readonly retryReason?: string
 }
 
 /** A value the Remote boundary can carry as-is. */
@@ -100,4 +118,13 @@ export interface TaskDetailDto extends TaskRowDto {
   readonly events: readonly TaskEventDto[]
   /** The verification report, from the final result or the latest attempt. */
   readonly validation?: { readonly satisfied: boolean; readonly checks: readonly CheckDto[] }
+  /**
+   * The retry budget this task is judged by, resolved (so it includes the
+   * deployment default). The diagnostics view needs it to say how much of the
+   * budget is left rather than only how many attempts were spent.
+   */
+  readonly retry: {
+    readonly maxAttempts: number
+    readonly retryableKinds: readonly string[]
+  }
 }

@@ -127,6 +127,20 @@ describe('read model', () => {
       expect(() => ctx.paimonTasks.taskDetail('missing')).toThrow(/missing/)
     })
   })
+
+  it('reads a zero-length window as "no events" rather than "all of them"', async () => {
+    // `slice(-0)` is `slice(0)`: the naive implementation answered "no limit"
+    // to a caller that asked for nothing.
+    const home = temporaryHome()
+    await withDshHome(home, async () => {
+      const ctx = await mount()
+      const task = ctx.paimonTasks.bind(agent, { goal: 'inspect me', workspace })
+      ctx.paimonTasks.runtime.startRun(task.id)
+
+      expect(ctx.paimonTasks.taskDetail(task.id).events.length).toBeGreaterThan(0)
+      expect(ctx.paimonTasks.taskDetail(task.id, 0).events).toEqual([])
+    })
+  })
 })
 
 describe('completion conditions through the adapter', () => {

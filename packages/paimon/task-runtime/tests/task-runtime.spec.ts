@@ -145,6 +145,20 @@ describe('task runtime: bounded retry', () => {
     expect(outcome.task.status).toBe('FAILED')
   })
 
+  it('records why an attempt was not retried, not just that it was not', () => {
+    // A diagnostics view can only explain a stop if the reason was written down
+    // when the decision was made; "stop" alone leaves the user guessing.
+    const { runtime } = harness()
+    const task = runtime.createTask({ goal: 'touch a protected file' })
+    runtime.startRun(task.id)
+    runtime.failRun(task.id, taskError('permission', 'denied by policy'))
+
+    const ended = runtime.getEvents(task.id).filter(event => event.type === 'run/ended')
+    expect(ended).toHaveLength(1)
+    expect(ended[0]?.data).toMatchObject({ retry: 'stop' })
+    expect(String(ended[0]?.data.reason)).toMatch(/permission/)
+  })
+
   it('honours a task-level retry policy', () => {
     const { runtime } = harness()
     const task = runtime.createTask({

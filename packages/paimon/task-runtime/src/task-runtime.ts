@@ -209,6 +209,17 @@ export class TaskRuntime {
     return this.#store.listEvents({ taskId })
   }
 
+  /**
+   * The retry policy a task will actually be judged by.
+   *
+   * Resolved rather than stored: a task created without a policy inherits the
+   * deployment default, and a reader that showed "no budget" for it would be
+   * reporting the absence of a field as the absence of a rule.
+   */
+  policyFor(taskId: string): RetryPolicy {
+    return this.#policyFor(this.#requireTask(taskId))
+  }
+
   // ------------------------------------------------------------------- runs
 
   /**
@@ -572,7 +583,14 @@ export class TaskRuntime {
     summary: string,
   ): RetryOutcome {
     if (task.cancelRequestedAt !== undefined) {
-      this.#record(task, 'run/ended', { attempt: run.attempt, status: run.status }, run.id)
+      // The reason travels with the event: a diagnostics view has to be able to
+      // say *why* an attempt was not retried, and "stop" on its own does not.
+      this.#record(task, 'run/ended', {
+        attempt: run.attempt,
+        status: run.status,
+        retry: 'stop',
+        reason: 'a cancellation request is on record; no retry may follow',
+      }, run.id)
       return {
         kind: 'failed',
         task: this.#finishTask(task, 'CANCELLED', 'cancelled by user', report),
@@ -589,7 +607,12 @@ export class TaskRuntime {
       deadlineExceeded: this.#deadlineExceeded(task),
       policy: this.#policyFor(task),
     })
-    this.#record(task, 'run/ended', { attempt: run.attempt, status: run.status, retry: decision.kind }, run.id)
+    this.#record(task, 'run/ended', {
+      attempt: run.attempt,
+      status: run.status,
+      retry: decision.kind,
+      reason: decision.reason,
+    }, run.id)
 
     if (decision.kind === 'retry') {
       task.currentRunId = undefined

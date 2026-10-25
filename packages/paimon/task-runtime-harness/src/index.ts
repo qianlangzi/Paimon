@@ -24,6 +24,7 @@ import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import {
   TaskRuntime,
   type CreateTaskInput,
+  type RetryPolicy,
   type Run,
   type Task,
   type TaskEvent,
@@ -103,6 +104,14 @@ export interface TaskDetail {
   readonly runs: readonly Run[]
   /** Oldest first, so a timeline can be rendered without reversing it. */
   readonly events: readonly TaskEvent[]
+  /**
+   * The policy this task will actually be judged by.
+   *
+   * Not `task.retryPolicy`: a task created without one inherits the deployment
+   * default, and a view that reported "no budget" for it would be wrong. The
+   * resolved value is the only one worth showing.
+   */
+  readonly retryPolicy: RetryPolicy
 }
 
 /** What a caller supplies when binding a task to an agent. */
@@ -260,7 +269,8 @@ export class PaimonTaskService extends Service {
    *
    * @param eventLimit - Keep only the most recent N events. A long task can
    * accumulate thousands and a view that asks for the tail should not pay for
-   * the whole log.
+   * the whole log. `0` keeps none; it must not be read as "no limit", because
+   * `slice(-0)` is `slice(0)` and would quietly return everything.
    */
   taskDetail(taskId: string, eventLimit?: number): TaskDetail {
     const task = this.runtime.getTask(taskId)
@@ -268,7 +278,8 @@ export class PaimonTaskService extends Service {
     return {
       task,
       runs: this.runtime.listRuns(taskId),
-      events: eventLimit === undefined ? events : events.slice(-Math.max(0, eventLimit)),
+      events: eventLimit === undefined ? events : tail(events, eventLimit),
+      retryPolicy: this.runtime.policyFor(taskId),
     }
   }
 
@@ -355,6 +366,17 @@ export class PaimonTaskService extends Service {
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+/**
+ * The last `limit` entries of a timeline.
+ *
+ * Spelled out because `slice(-limit)` silently means "all of it" when `limit`
+ * is 0, which is exactly the value a caller uses to ask for nothing.
+ */
+function tail<T>(items: readonly T[], limit: number): readonly T[] {
+  const keep = Math.max(0, Math.trunc(limit))
+  return keep === 0 ? [] : items.slice(-keep)
 }
 
 export default PaimonTaskService

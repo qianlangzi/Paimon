@@ -91,7 +91,16 @@ export class PaimonTaskController extends TypertRemoteService {
     // The default cannot live on the Remote signature — the generator rejects
     // defaulted parameters, because the wire contract has no way to express
     // one — so it is applied here instead.
-    return toTaskDetail(this.ctx.paimonTasks.taskDetail(taskId, eventLimit ?? DEFAULT_EVENT_LIMIT))
+    //
+    // The window is applied *after* the projection, not before: a non-final
+    // validation report only exists as an event, so truncating the timeline
+    // first would make the checks disappear on any task whose last probe fell
+    // outside the window — which is every task that retried a few times. The
+    // adapter already holds the whole log in memory, so this costs a projection
+    // of the discarded rows and nothing else.
+    const detail = toTaskDetail(this.ctx.paimonTasks.taskDetail(taskId))
+    const keep = Math.max(0, Math.trunc(eventLimit ?? DEFAULT_EVENT_LIMIT))
+    return keep >= detail.events.length ? detail : { ...detail, events: keep === 0 ? [] : detail.events.slice(-keep) }
   }
 }
 

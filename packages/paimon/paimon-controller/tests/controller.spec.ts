@@ -1,5 +1,5 @@
 import { Context } from '@deepseek-ai/cordis'
-import type { Run, Task, TaskEvent } from '@deepseek-ai/dsh-paimon-task-runtime'
+import type { RetryPolicy, Run, Task, TaskEvent } from '@deepseek-ai/dsh-paimon-task-runtime'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PaimonTaskController } from '../src/index.ts'
 
@@ -70,6 +70,21 @@ const events: TaskEvent[] = [
   { id: 'e2', taskId: 'task-1', runId: 'run-1', type: 'validation/completed', timestamp: '2026-10-24T10:00:04.000Z', data: { satisfied: false, checks: [{ id: 'tests', outcome: 'not-checked', note: 'no test report was collected' }] } },
 ]
 
+/** The resolved policy the adapter reports; the projection copies it verbatim. */
+const policy: RetryPolicy = { maxAttempts: 3, retryableKinds: ['model', 'tool', 'internal'] }
+
+/** A timeline entry that carries nothing but its position, for window tests. */
+function filler(index: number): TaskEvent {
+  return {
+    id: `f${index}`,
+    taskId: 'task-1',
+    runId: 'run-1',
+    type: 'tool/executed',
+    timestamp: `2026-10-24T10:01:${String(index % 60).padStart(2, '0')}.000Z`,
+    data: { index },
+  }
+}
+
 const disposals: Array<() => Promise<void>> = []
 
 afterEach(async () => {
@@ -78,9 +93,12 @@ afterEach(async () => {
 
 function mount(overrides: { listTasks?: () => readonly Task[]; taskDetail?: (id: string, limit?: number) => unknown } = {}) {
   const ctx = new Context()
+  const base = overrides.taskDetail ?? (() => ({ task: openTask, runs: [run], events }))
   const fake = {
     listTasks: overrides.listTasks ?? (() => [openTask, waitingTask, finishedTask]),
-    taskDetail: overrides.taskDetail ?? vi.fn(() => ({ task: openTask, runs: [run], events })),
+    // Every detail carries the resolved policy; a case that cares about the
+    // policy states its own and wins over this default.
+    taskDetail: vi.fn((id: string, limit?: number) => ({ retryPolicy: policy, ...base(id, limit) as object })),
   }
   ctx.provide('paimonTasks', fake as never)
   disposals.push(async () => { await ctx.fiber.dispose() })
@@ -122,17 +140,45 @@ describe('task rows', () => {
 })
 
 describe('task detail', () => {
-  it('passes the event window through to the adapter', async () => {
+  it('applies the event window to the payload, not to the read', async () => {
+    // The read has to stay whole: the validation report is rebuilt from the
+    // timeline, so a truncated read would silently drop the checks of any task
+    // whose last probe fell outside the window.
     const { controller, fake } = mount()
-    await controller.detail('task-1', 15)
-    expect(fake.taskDetail).toHaveBeenCalledWith('task-1', 15)
+    const detail = await controller.detail('task-1', 1)
+    expect(fake.taskDetail).toHaveBeenCalledWith('task-1')
+    expect(detail.events.map(event => event.type)).toEqual(['validation/completed'])
+    expect(detail.validation?.checks).toHaveLength(1)
   })
 
   it('defaults to a bounded window rather than the whole log', async () => {
-    const { controller, fake } = mount()
-    await controller.detail('task-1')
-    const limit = (fake.taskDetail as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]?.[1]
-    expect(typeof limit).toBe('number')
+    const { controller } = mount({
+      taskDetail: () => ({
+        task: openTask,
+        runs: [run],
+        events: Array.from({ length: 500 }, (_, index) => filler(index)),
+      }),
+    })
+    const detail = await controller.detail('task-1')
+    expect(detail.events.length).toBe(200)
+  })
+
+  it('reads a zero-length window as "no events" rather than "no limit"', async () => {
+    const { controller } = mount()
+    expect((await controller.detail('task-1', 0)).events).toEqual([])
+  })
+
+  it('keeps the report of a task whose probe is older than the window', async () => {
+    // The regression this guards: the window used to be applied to the read, so
+    // a retried task lost its checks the moment the timeline outgrew the window.
+    const noise: TaskEvent[] = Array.from({ length: 50 }, (_, index) => filler(index))
+    const { controller } = mount({
+      taskDetail: () => ({ task: openTask, runs: [run], events: [...events, ...noise] }),
+    })
+    const detail = await controller.detail('task-1', 5)
+    expect(detail.events).toHaveLength(5)
+    expect(detail.events.some(event => event.type === 'validation/completed')).toBe(false)
+    expect(detail.validation?.satisfied).toBe(false)
   })
 
   it('maps runs into the attempt shape, keeping the failure class but not the message', async () => {
@@ -178,5 +224,60 @@ describe('task detail', () => {
       taskDetail: () => { throw new Error('task missing not found') },
     })
     await expect(controller.detail('missing')).rejects.toThrow(/missing/)
+  })
+})
+
+describe('diagnostics projection', () => {
+  it('reports the resolved retry budget, not the task field that may be absent', async () => {
+    // `openTask` carries no `retryPolicy`: it inherits the deployment default,
+    // and the view must be able to say "3 attempts" rather than "unknown".
+    const { controller } = mount()
+    expect((await controller.detail('task-1')).retry).toEqual({
+      maxAttempts: 3,
+      retryableKinds: ['model', 'tool', 'internal'],
+    })
+  })
+
+  it('turns a relative budget into the instant it expires', async () => {
+    const { controller } = mount()
+    const row = (await controller.list()).find(item => item.id === 'task-1')
+    expect(row?.deadlineMs).toBe(60_000)
+    expect(row?.deadlineAt).toBe('2026-10-24T10:01:01.000Z')
+  })
+
+  it('omits the expiry while a task has not started', async () => {
+    const { controller } = mount({ listTasks: () => [{ ...openTask, startedAt: undefined }] })
+    expect((await controller.list())[0]?.deadlineAt).toBeUndefined()
+  })
+
+  it('survives a task whose start timestamp does not parse', async () => {
+    // The file store is hand-editable; one unreadable timestamp must not make
+    // the whole list reject, which would blank every view at once.
+    const { controller } = mount({ listTasks: () => [{ ...openTask, startedAt: 'not a timestamp' }] })
+    expect((await controller.list())[0]?.deadlineAt).toBeUndefined()
+  })
+
+  it('joins the recorded retry verdict onto the attempt it belongs to', async () => {
+    const ended: TaskEvent = {
+      id: 'e3',
+      taskId: 'task-1',
+      runId: 'run-1',
+      type: 'run/ended',
+      timestamp: '2026-10-24T10:00:05.000Z',
+      data: { attempt: 1, status: 'FAILED', retry: 'retry', reason: 'failure kind "tool" is retryable' },
+    }
+    const { controller } = mount({
+      taskDetail: () => ({ task: openTask, runs: [run], events: [...events, ended], retryPolicy: policy }),
+    })
+    expect((await controller.detail('task-1')).runs[0]).toMatchObject({
+      attempt: 1,
+      retryDecision: 'retry',
+      retryReason: 'failure kind "tool" is retryable',
+    })
+  })
+
+  it('leaves the verdict absent for an attempt that is still running', async () => {
+    const { controller } = mount()
+    expect((await controller.detail('task-1')).runs[0]?.retryDecision).toBeUndefined()
   })
 })
