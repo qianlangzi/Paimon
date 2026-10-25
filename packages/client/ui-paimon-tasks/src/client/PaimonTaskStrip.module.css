@@ -1,0 +1,57 @@
+/* The task strip lives in the conversation input dock, so it must read as part
+   of that strip: one row, no card, no shadow. */
+
+.strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsh-text-secondary, #6b7280);
+  min-width: 0;
+}
+
+.count {
+  font-weight: 600;
+  color: var(--dsh-text-primary, #111827);
+}
+
+.running {
+  color: var(--dsh-accent, #2563eb);
+}
+
+.waiting {
+  color: var(--dsh-warning, #b45309);
+  font-weight: 600;
+}
+
+.newest {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.error {
+  color: var(--dsh-danger, #b91c1c);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.refresh {
+  margin-left: auto;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: inherit;
+  padding: 0 4px;
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.refresh:hover {
+  color: var(--dsh-text-primary, #111827);
+}

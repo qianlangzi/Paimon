@@ -16,15 +16,20 @@
 import { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-paimon-task-harness'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
-import { type TaskDetailDto, type TaskRowDto, toTaskDetail, toTaskRow } from './types.ts'
+import type { TaskDetailDto, TaskRowDto } from './types.ts'
+import { toTaskDetail, toTaskRow } from './project.ts'
 
 export type {
   CheckDto,
   RunDto,
   TaskDetailDto,
   TaskEventDto,
+  TaskEventValue,
+  TaskOutcomeDto,
   TaskRowDto,
+  TaskStatusDto,
 } from './types.ts'
+export { toTaskDetail, toTaskRow } from './project.ts'
 
 /** Default timeline window, matching what a detail panel can scroll comfortably. */
 const DEFAULT_EVENT_LIMIT = 200

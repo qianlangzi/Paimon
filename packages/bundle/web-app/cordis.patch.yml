@@ -403,6 +403,11 @@
     - id: ui-goal
       name: '@deepseek-ai/dsh-client-ui-goal'
 
+    # Paimon task strip: a count of open tasks and the newest goal, in the same
+    # input dock, over the generated paimonTask Remote namespace.
+    - id: ui-paimon-tasks
+      name: '@deepseek-ai/dsh-client-ui-paimon-tasks'
+
     # The feedback surface: Like/Dislike in the assistant-message action
     # strip, the feedback dialog behind Dislike and /feedback with its
     # acknowledgement toast, over the messageFeedback and sessionFeedback Remotes.
