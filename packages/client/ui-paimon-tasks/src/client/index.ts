@@ -44,8 +44,13 @@ export function apply(ctx: ClientContext): void {
     id: 'paimon-tasks',
     order: 20,
     locale: NS,
-    // The strip loads on its own schedule, so the injected face is just the
-    // Remote call: resolving it here would make the dock wait on the network.
-    inject: () => ({ load: () => ctx.remote.paimonTask.list() }),
+    // Both reads are handed over unstarted: the strip loads on its own schedule
+    // and only fetches a detail when a human opens a row, so resolving either
+    // here would make the dock wait on the network for something nobody asked
+    // for yet.
+    inject: () => ({
+      load: () => ctx.remote.paimonTask.list(),
+      loadDetail: (taskId, eventLimit) => ctx.remote.paimonTask.detail(taskId, eventLimit),
+    }),
   }, PaimonTaskStrip))
 }

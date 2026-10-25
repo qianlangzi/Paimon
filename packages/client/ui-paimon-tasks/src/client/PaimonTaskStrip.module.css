@@ -1,5 +1,13 @@
 /* The task strip lives in the conversation input dock, so it must read as part
-   of that strip: one row, no card, no shadow. */
+   of that strip: one summary row, chips under it, and the detail only when a
+   human asked for one. No cards, no shadow. */
+
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
 
 .strip {
   display: flex;
@@ -26,13 +34,6 @@
   font-weight: 600;
 }
 
-.newest {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .error {
   color: var(--dsh-danger, #b91c1c);
   min-width: 0;
@@ -54,4 +55,140 @@
 
 .refresh:hover {
   color: var(--dsh-text-primary, #111827);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 8px 4px;
+  min-width: 0;
+}
+
+.chip {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid var(--dsh-border, #e5e7eb);
+  border-radius: 999px;
+  background: none;
+  color: var(--dsh-text-secondary, #6b7280);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 18px;
+  padding: 0 8px;
+}
+
+.chip:hover {
+  color: var(--dsh-text-primary, #111827);
+  border-color: var(--dsh-text-secondary, #9ca3af);
+}
+
+.chip[data-open='true'] {
+  color: var(--dsh-text-primary, #111827);
+  border-color: var(--dsh-accent, #2563eb);
+}
+
+.chip[data-status='WAITING_APPROVAL'] {
+  color: var(--dsh-warning, #b45309);
+  border-color: var(--dsh-warning, #f59e0b);
+}
+
+.chip[data-status='FAILED'],
+.chip[data-status='TIMED_OUT'] {
+  color: var(--dsh-danger, #b91c1c);
+}
+
+.more {
+  font-size: 11px;
+  color: var(--dsh-text-secondary, #9ca3af);
+  align-self: center;
+}
+
+.detail {
+  margin: 0 8px 6px;
+  padding: 8px;
+  border: 1px solid var(--dsh-border, #e5e7eb);
+  border-radius: 8px;
+  background: var(--dsh-surface-sunken, #f9fafb);
+  font-size: 12px;
+  line-height: 18px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.detailHead {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.detailGoal {
+  font-weight: 600;
+  color: var(--dsh-text-primary, #111827);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detailStatus {
+  font-weight: 600;
+}
+
+.detailStatus[data-status='SUCCEEDED'] {
+  color: var(--dsh-success, #15803d);
+}
+
+.detailStatus[data-status='FAILED'],
+.detailStatus[data-status='TIMED_OUT'] {
+  color: var(--dsh-danger, #b91c1c);
+}
+
+.detailStatus[data-status='WAITING_APPROVAL'] {
+  color: var(--dsh-warning, #b45309);
+}
+
+.close {
+  margin-left: auto;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--dsh-text-secondary, #6b7280);
+  font-size: 11px;
+  padding: 0;
+}
+
+.block {
+  margin-top: 6px;
+}
+
+.blockTitle {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--dsh-text-secondary, #9ca3af);
+  margin-bottom: 2px;
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.eventType {
+  font-family: var(--dsh-font-mono, ui-monospace, monospace);
+  font-size: 11px;
+}
+
+.muted {
+  color: var(--dsh-text-secondary, #6b7280);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
