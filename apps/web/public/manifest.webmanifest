@@ -1,6 +1,6 @@
 {
-  "name": "DeepSeek Harness",
-  "short_name": "DSH",
+  "name": "Paimon",
+  "short_name": "Paimon",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

@@ -16,15 +16,18 @@ describe('web install icons', () => {
     }
   })
 
-  it('crops the desktop shadow and scales only the maskable artwork', async () => {
+  it('crops the desktop tile group and scales only the maskable artwork', async () => {
     const source = await readFile(TILE_SOURCE, 'utf8')
     const tile = tileDocument(source)
     const maskable = maskableDocument(source)
     expect(tile).toContain('viewBox="40 32 1024 1024"')
-    expect(tile).not.toContain('<g filter="url(#filter0_d_1637_371)">')
+    // The crop replaces the tile group, which is what drops a desktop shadow.
+    expect(tile).not.toContain('<g id="tile">')
     expect(tile).not.toContain(`scale(${MASKABLE_ARTWORK_SCALE})`)
-    expect(tile).toContain('<g filter="url(#filter1_ddi_1637_371)">')
-    expect(tile).toContain(source.match(/<path\b[^>]*>/u)![0])
+    expect(tile).toContain('<g id="artwork">')
+    // The mark itself has to survive the crop, not just the plate: it is the one
+    // element that carries the counter mask.
+    expect(tile).toContain('mask="url(#counter)"')
     expect(tile).toContain(source.match(/<defs>[\s\S]*<\/defs>/u)![0])
     expect(maskable).toContain(`transform="translate(552 544) scale(${MASKABLE_ARTWORK_SCALE}) translate(-552 -544)"`)
   })
@@ -36,8 +39,8 @@ describe('web install icons', () => {
 
   it('fails loudly on a source without the tile it transforms', () => {
     expect(() => tileDocument('')).toThrow(/no root element/)
-    expect(() => tileDocument('<svg></svg>')).toThrow(/no shadowed tile group/)
-    expect(() => maskableDocument('<svg><g filter="url(#filter0_d_1637_371)"></g></svg>'))
+    expect(() => tileDocument('<svg></svg>')).toThrow(/no tile group/)
+    expect(() => maskableDocument('<svg><g id="tile"></g></svg>'))
       .toThrow(/no artwork group/)
   })
 })
