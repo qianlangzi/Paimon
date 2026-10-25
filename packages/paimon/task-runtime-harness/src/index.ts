@@ -5,7 +5,8 @@
  * rather than replacing any of them:
  *
  * - `tools/pre-execute` waterfall → {@link TaskBindings.gate} → `PreToolDecision`
- * - `ctx.approval` seam          → {@link TaskBindings.resolveApproval}
+ * - `ctx.approval` seam          → {@link TaskBindings.resolveApproval}, asked
+ *   with the task's goal and attempt attached ({@link approvalContextOf})
  * - `tools/result` observation   → {@link TaskBindings.recordToolOutcome}
  * - `agent.cancel`               → request/acknowledge cancellation
  *
@@ -32,6 +33,7 @@ import type { PreToolDecision, ToolExecution, ToolExecutionResult } from '@deeps
 import type {} from '@deepseek-ai/dsh-user-approval'
 import z from '@deepseek-ai/schemastery'
 import { join } from 'node:path'
+import { type ApprovalContext, approvalContextOf } from './approval-context.ts'
 import { TaskBindings, type AgentRef } from './binding.ts'
 import { type ResolvedApproval, approvalToResolved, toPreToolDecision } from './mapping.ts'
 import { DEFAULT_PATH_ARGUMENT_KEYS, extractPathArgument } from './path-args.ts'
@@ -40,6 +42,13 @@ import { DEFAULT_PATH_ARGUMENT_KEYS, extractPathArgument } from './path-args.ts'
 // tests drive them without a context, and an embedder may want the pure
 // mapping helpers. Re-exporting keeps a single import path.
 export { TaskBindings, type AgentRef, type TaskBinding } from './binding.ts'
+export {
+  type ApprovalContext,
+  type ApprovalTaskRef,
+  GOAL_EXCERPT_LIMIT,
+  approvalContextOf,
+  summarizeGoal,
+} from './approval-context.ts'
 export { type ToolResultLike, type EvidenceInput, extractEvidence } from './evidence.ts'
 export { type ResolvedApproval, approvalToResolved, toPreToolDecision } from './mapping.ts'
 export { DEFAULT_PATH_ARGUMENT_KEYS, extractPathArgument } from './path-args.ts'
@@ -279,24 +288,49 @@ export class PaimonTaskService extends Service {
     if (decision === undefined) return next()
     if (decision.kind !== 'require-approval') return toPreToolDecision(decision)
 
-    const resolved = await this.askApproval(exec, agent, decision.reason)
+    const resolved = await this.askApproval(exec, agent, this.approvalContextFor(agent, exec.name))
     const settled = this.taskBindings.resolveApproval(agent, resolved.approved, resolved.reason)
     // `settled` is undefined only if the task was not actually waiting, which
     // would mean this layer lost track of its own state. Fail closed.
     return toPreToolDecision(settled ?? { kind: 'deny', reason: resolved.reason })
   }
 
+  /**
+   * The prompt text for one gated call: the goal it serves and which attempt is
+   * asking.
+   *
+   * The runtime's own `require-approval` reason is the generic "the operation
+   * needs a human decision", which is all it can say — it does not know the
+   * caller's presentation channel. The adapter knows the task, so it replaces
+   * that sentence with one the reader can act on and leaves the decision
+   * semantics to the seam.
+   * @param agent - the agent whose call needs a decision.
+   * @param toolName - the tool the decision is about.
+   * @returns the audit reason and the localized presentation copy.
+   */
+  private approvalContextFor(agent: Agent, toolName: string): ApprovalContext {
+    const task = this.taskBindings.taskOf(agent)
+    return approvalContextOf(
+      task === undefined ? undefined : { goal: task.goal, attempt: task.runIds.length },
+      toolName,
+    )
+  }
+
   private async askApproval(
     exec: ToolExecution,
     agent: Agent,
-    reason: string,
+    context: ApprovalContext,
   ): Promise<ResolvedApproval> {
     try {
       const outcome = await this.ctx.approval.request({
         agent,
         toolName: exec.name,
         callId: exec.callId,
-        reason,
+        reason: context.reason,
+        // Presentation copy only; the audit event keeps `reason`. Supplying it
+        // is what lets a client render the question in the user's language
+        // instead of falling back to the English audit sentence.
+        displayReason: context.displayReason,
         signal: exec.signal,
       })
       return approvalToResolved(outcome)
