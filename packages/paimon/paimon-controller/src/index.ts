@@ -1,20 +1,21 @@
 /**
  * Host-side read model for the Paimon desktop surfaces.
  *
- * Step S1 of `Paimon-M5-Plan.md`. It answers the two questions every view asks
- * — "what tasks are there" and "what happened in this one" — in the shapes the
- * views render, and nothing else. Write operations (cancel, abandon) stay out
- * of this package on purpose: they belong to a later step, and a read-only
- * controller cannot accidentally become a second place that decides state.
+ * Step S1 of `Paimon-M5-Plan.md`, and the Host half of S2: it answers the two
+ * questions every view asks — "what tasks are there" and "what happened in this
+ * one" — in the shapes the views render, and exposes them as the `paimonTask`
+ * Remote namespace.
  *
- * The remote contract (`ctx.remote.paimonTask`) is generated from this service
- * in S2; until then the service is reachable from the Host and from tests.
+ * Write operations (cancel, abandon) stay out of this package on purpose: they
+ * belong to a later step, and a read-only controller cannot accidentally become
+ * a second place that decides state.
  *
  * @module @deepseek-ai/dsh-paimon-controller
  */
 
-import { Context, Service } from '@deepseek-ai/cordis'
+import { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-paimon-task-harness'
+import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { type TaskDetailDto, type TaskRowDto, toTaskDetail, toTaskRow } from './types.ts'
 
 export type {
@@ -28,18 +29,26 @@ export type {
 /** Default timeline window, matching what a detail panel can scroll comfortably. */
 const DEFAULT_EVENT_LIMIT = 200
 
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    /** Read model the Paimon desktop surfaces ask. */
+    paimonTask: PaimonTaskController
+  }
+}
+
 /**
- * Read model over the task governance layer, exposed as `ctx.paimonTask`.
+ * Read model over the task governance layer, exposed as `ctx.paimonTask` and as
+ * the `paimonTask` Remote namespace.
  *
  * Requires `paimonTasks`: without the adapter there is nothing to read, and a
  * composition that omits it should not activate this service rather than serve
  * empty lists that look like "no tasks".
  */
-export class PaimonTaskController extends Service {
+export class PaimonTaskController extends TypertRemoteService {
   static inject = ['paimonTasks']
 
   constructor(ctx: Context) {
-    super(ctx, 'paimonTask')
+    super(ctx, 'paimonTask', { namespace: 'paimonTask' })
   }
 
   /**
@@ -48,8 +57,11 @@ export class PaimonTaskController extends Service {
    * The list is the entry point for all four views, so it is sorted here rather
    * than in each view: a persisted history has no natural order, and two views
    * disagreeing about "most recent" would be a bug nobody owns.
+   *
+   * @returns one row per task.
    */
-  list(): readonly TaskRowDto[] {
+  @Remote
+  async list(): Promise<readonly TaskRowDto[]> {
     return this.ctx.paimonTasks.listTasks()
       .map(toTaskRow)
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
@@ -58,11 +70,23 @@ export class PaimonTaskController extends Service {
   /**
    * One task with its attempts and timeline.
    *
-   * @param eventLimit - Keep only the most recent N events. Defaults to
-   * {@link DEFAULT_EVENT_LIMIT}; a long task can hold thousands.
+   * @param taskId - task to read; an unknown id rejects rather than returning an
+   * empty detail, because "no such task" and "a task with nothing in it" are
+   * different facts and a view shows them differently.
+   * @param eventLimit - keep only the most recent N events; omitted means
+   * {@link DEFAULT_EVENT_LIMIT}.
+   * @returns the detail payload.
    */
-  detail(taskId: string, eventLimit: number = DEFAULT_EVENT_LIMIT): TaskDetailDto {
-    return toTaskDetail(this.ctx.paimonTasks.taskDetail(taskId, eventLimit))
+  @Remote
+  async detail(taskId: string, eventLimit?: number): Promise<TaskDetailDto> {
+    // `async` rather than `Promise.resolve(...)`: a synchronous throw from the
+    // adapter would otherwise escape as a throw instead of a rejection, which a
+    // Remote caller has no way to observe and the dispatcher would surface as a
+    // transport failure.
+    // The default cannot live on the Remote signature — the generator rejects
+    // defaulted parameters, because the wire contract has no way to express
+    // one — so it is applied here instead.
+    return toTaskDetail(this.ctx.paimonTasks.taskDetail(taskId, eventLimit ?? DEFAULT_EVENT_LIMIT))
   }
 }
 

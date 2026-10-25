@@ -424,6 +424,8 @@
     { "path": "./packages/paimon/task-runtime" },
     { "path": "./packages/paimon/task-runtime-harness" },
     { "path": "./packages/paimon/tool-paimon-task" },
+    { "path": "./packages/paimon/task-store-file" },
+    { "path": "./packages/paimon/paimon-controller" },
     { "path": "./packages/core/tool-executor-native" },
     { "path": "./packages/core/tool-executor-ptc" },
     { "path": "./packages/core/agent-tool-presentation" },

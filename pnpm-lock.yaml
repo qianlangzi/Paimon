@@ -12838,9 +12838,6 @@ importers:
       '@deepseek-ai/dsh-paimon-task-runtime':
         specifier: workspace:*
         version: link:../task-runtime
-      '@deepseek-ai/schemastery':
-        specifier: link:../../../vendor/schemastery
-        version: link:../../../vendor/schemastery
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: workspace:~
@@ -12848,6 +12845,9 @@ importers:
       '@deepseek-ai/dsh-paimon-task-harness':
         specifier: workspace:*
         version: link:../task-runtime-harness
+      '@deepseek-ai/dsh-typert-protocol':
+        specifier: workspace:*
+        version: link:../../typert/protocol
 
   packages/paimon/task-runtime:
     devDependencies:

@@ -56,13 +56,22 @@ export interface RunDto {
   readonly resultSummary?: string
 }
 
+/** A value the Remote boundary can carry as-is. */
+export type TaskEventValue = string | number | boolean | null
+
 /** One timeline entry. */
 export interface TaskEventDto {
   readonly type: string
   readonly timestamp: string
   readonly runId?: string
-  /** Already redacted when recorded; safe to render. */
-  readonly data: Readonly<Record<string, unknown>>
+  /**
+   * Already redacted when recorded; safe to render.
+   *
+   * Scalars only. The Remote boundary cannot carry unconstrained data, so a
+   * nested object or array arrives as JSON text — a view that needs the
+   * structure should read the typed `validation` block instead of parsing this.
+   */
+  readonly data: Record<string, TaskEventValue>
 }
 
 /** One completion check as a view renders it. */
@@ -143,8 +152,19 @@ function toEvent(event: TaskEvent): TaskEventDto {
     type: event.type,
     timestamp: event.timestamp,
     ...event.runId === undefined ? {} : { runId: event.runId },
-    data: event.data,
+    data: toEventData(event.data),
   }
+}
+
+function toEventData(data: Readonly<Record<string, unknown>>): Record<string, TaskEventValue> {
+  const output: Record<string, TaskEventValue> = {}
+  for (const [key, value] of Object.entries(data)) {
+    if (value === undefined) continue
+    output[key] = value === null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
+      ? value
+      : JSON.stringify(value) ?? null
+  }
+  return output
 }
 
 function toValidation(report: ValidationReport): NonNullable<TaskDetailDto['validation']> {
