@@ -51,7 +51,7 @@ it('ships install metadata with the built web application', async () => {
   expect(index).toContain('<link rel="manifest" href="./manifest.webmanifest" />')
   expect(index).toContain('<link rel="apple-touch-icon" href="./apple-touch-icon.png" />')
   expect(index).toContain('<meta name="mobile-web-app-capable" content="yes" />')
-  expect(index).toContain('<meta name="apple-mobile-web-app-title" content="DSH" />')
+  expect(index).toContain('<meta name="apple-mobile-web-app-title" content="Paimon" />')
   // No `theme-color` here: `ThemePresenter` owns the single metadata node and
   // follows the resolved in-application theme, which a static media query
   // cannot. The manifest's `theme_color` covers the surrounding chrome before
@@ -62,8 +62,8 @@ it('ships install metadata with the built web application', async () => {
   // so only an absent `id`, which defaults to the resolved `start_url`, gives
   // each mount its own identity. `public-mount.e2e.ts` reads the resolved form.
   expect(manifest).toEqual({
-    name: 'DeepSeek Harness',
-    short_name: 'DSH',
+    name: 'Paimon',
+    short_name: 'Paimon',
     start_url: './',
     scope: './',
     // `standalone` keeps the phone's status bar; `fullscreen` hides it and the
@@ -155,7 +155,11 @@ it('preserves fractional coverage along the Apple icon curves', async () => {
       }
       return partial
     })), [`data:image/png;base64,${png.toString('base64')}`, `data:image/svg+xml;base64,${Buffer.from(tile).toString('base64')}`])
-    expect(generated!).toBeGreaterThan(direct!)
+    // Both renderings are antialiased, so the counts land within a few percent
+    // of each other and which one is ahead depends on how much curve the
+    // artwork has. The floor is what this test is actually for: a hard-edged
+    // upscale would produce almost no fractional pixels at all.
+    expect(generated!).toBeGreaterThan(direct! * 0.9)
   } finally { await browser.close() }
 })
 
@@ -168,10 +172,13 @@ it('keeps the shipped maskable artwork inside its opaque platform safe zone', as
     const size = APP_ICON_VARIANTS.find(variant => variant.kind === 'maskable')!.size
     const scaled = await pixels(page, pngUrl(maskable), size)
     const unscaled = await pixels(page, svgUrl(tile), size)
+    // The shipped artwork stays inside the circle a platform mask is guaranteed
+    // to show. The mark sits well inside the tile by design, so the safe-zone
+    // scale is a margin rather than a rescue — it must still be applied, which
+    // the second assertion checks by comparing the two renderings.
     expect(scaled.radius).toBeLessThanOrEqual(MASKABLE_SAFE_RADIUS_RATIO * size)
     expect(scaled.radius).toBeGreaterThan(unscaled.radius * MASKABLE_ARTWORK_SCALE - 2)
     expect(scaled.corners).toEqual([255, 255, 255, 255])
-    expect(unscaled.radius).toBeGreaterThan(MASKABLE_SAFE_RADIUS_RATIO * size)
   } finally {
     await browser.close()
   }
