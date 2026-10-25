@@ -69,7 +69,7 @@ describe('PaimonTaskStrip', () => {
     const { container } = render(
       <PaimonTaskStrip load={makeLoad([])} loadDetail={makeLoadDetail()} t={t} />,
     )
-    await waitFor(() => expect(container.firstChild).toBeNull())
+    await waitFor(() => { expect(container.firstChild).toBeNull() })
   })
 
   it('summarises the open work and names the most recent task', async () => {
@@ -160,7 +160,7 @@ describe('PaimonTaskStrip detail', () => {
     await screen.findByTestId('paimon-task-detail')
 
     fireEvent.click(chip)
-    await waitFor(() => expect(screen.queryByTestId('paimon-task-detail')).toBeNull())
+    await waitFor(() => { expect(screen.queryByTestId('paimon-task-detail')).toBeNull() })
 
     fireEvent.click(chip)
     await screen.findByTestId('paimon-task-detail')
@@ -183,10 +183,15 @@ describe('PaimonTaskStrip detail', () => {
   })
 
   it('shows an empty-timeline note instead of a blank block', async () => {
+    // The record of a task that has not settled carries no report at all, so
+    // the field is dropped rather than set to `undefined`: with
+    // `exactOptionalPropertyTypes` those are different objects, and only the
+    // absent one matches what the Host can actually send.
+    const { validation: _noReport, ...unsatisfied } = detail({ events: [], runs: [] })
     render(
       <PaimonTaskStrip
         load={makeLoad([row()])}
-        loadDetail={makeLoadDetail({ ok: true, value: detail({ events: [], runs: [], validation: undefined }) })}
+        loadDetail={makeLoadDetail({ ok: true, value: unsatisfied })}
         t={t}
       />,
     )
