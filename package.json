@@ -301,6 +301,12 @@
     "@deepseek-ai/dsh-experimental-subagent-oar": "workspace:*",
     "@deepseek-ai/dsh-experimental-tool-subagent-oar": "workspace:*",
     "@deepseek-ai/dsh-experimental-cua-macos": "workspace:*",
-    "@deepseek-ai/dsh-action-cards": "workspace:*"
+    "@deepseek-ai/dsh-action-cards": "workspace:*",
+    "@deepseek-ai/dsh-paimon-controller": "link:../paimon-src/packages/paimon-controller",
+    "@deepseek-ai/dsh-paimon-task-harness": "link:../paimon-src/packages/task-runtime-harness",
+    "@deepseek-ai/dsh-paimon-task-runtime": "link:../paimon-src/packages/task-runtime",
+    "@deepseek-ai/dsh-paimon-task-store-file": "link:../paimon-src/packages/task-store-file",
+    "@deepseek-ai/dsh-client-ui-paimon-tasks": "link:../paimon-src/packages/ui-paimon-tasks",
+    "@deepseek-ai/dsh-tool-paimon-task": "link:../paimon-src/packages/tool-paimon-task"
   }
 }

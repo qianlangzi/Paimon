@@ -1,6 +1,0 @@
-{
-  "meta": {
-    "title": "paimon-task-runtime",
-    "description": "Task and run lifecycle, bounded retry, deadline coordination and evidence-based completion for Paimon."
-  }
-}

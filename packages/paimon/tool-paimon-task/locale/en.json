@@ -1,6 +1,0 @@
-{
-  "meta": {
-    "title": "tool-paimon-task",
-    "description": "Model-facing Paimon task controls: create a task, read its state, and attempt to finish it against observed evidence."
-  }
-}

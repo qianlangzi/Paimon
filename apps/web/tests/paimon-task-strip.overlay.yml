@@ -1,8 +1,9 @@
 # The Paimon task layer over the shipped Web surface.
 #
-# Only the Host half is inserted here: the browser half (`ui-paimon-tasks`) is
-# already composed by `@deepseek-ai/dsh-web-app`, so naming it again would mount
-# a second entry in the same input dock.
+# Both halves are inserted here. The browser half used to be composed by
+# `@deepseek-ai/dsh-web-app`, which meant every product with a surface had to edit
+# that upstream file; naming it here is the replacement, and it is also why
+# `ui-paimon-tasks` appears in this test's install anchors.
 #
 # `persist: false` is stated rather than left to the default: this overlay exists
 # for a browser test, and a test must never write into the developer's real
@@ -15,3 +16,5 @@
         persist: false
     - id: paimon-controller
       name: '@deepseek-ai/dsh-paimon-controller'
+    - id: ui-paimon-tasks
+      name: '@deepseek-ai/dsh-client-ui-paimon-tasks'

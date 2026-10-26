@@ -22,13 +22,13 @@ import { connectFreshWorkspace, newEnglishPage, saveFailureShot } from './suppor
 
 const OVERLAY = fileURLToPath(new URL('./paimon-task-strip.overlay.yml', import.meta.url))
 const INSTALL_ANCHORS = [
-  fileURLToPath(new URL('../../../packages/paimon/task-runtime-harness/package.json', import.meta.url)),
-  fileURLToPath(new URL('../../../packages/paimon/paimon-controller/package.json', import.meta.url)),
-  // The browser half is named by the shipped Web bundle, not by this overlay, so
-  // its manifest has to be an anchor too: without it the scaffold's profile can
-  // name the dock entry but cannot resolve the package, and the plugin is
-  // dropped at import time with nothing in the UI to show for it.
-  fileURLToPath(new URL('../../../packages/client/ui-paimon-tasks/package.json', import.meta.url)),
+  fileURLToPath(new URL('../../../../paimon-src/packages/task-runtime-harness/package.json', import.meta.url)),
+  fileURLToPath(new URL('../../../../paimon-src/packages/paimon-controller/package.json', import.meta.url)),
+  // The browser half is no longer named by the shipped Web bundle (the product stopped
+  // editing it), so the overlay mounts it and its manifest has to be an anchor too:
+  // without it the scaffold's profile can name the dock entry but cannot resolve
+  // the package, and the plugin is dropped at import time with nothing to show.
+  fileURLToPath(new URL('../../../../paimon-src/packages/ui-paimon-tasks/package.json', import.meta.url)),
 ]
 
 /** Goal of the task the test opens; also its chip's accessible name. */

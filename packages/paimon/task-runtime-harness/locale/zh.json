@@ -1,6 +1,0 @@
-{
-  "meta": {
-    "title": "Paimon 任务适配器",
-    "description": "把 Paimon 任务绑定到 harness agent，并将工具流水线、审批 seam 与取消操作路由到任务治理层。"
-  }
-}

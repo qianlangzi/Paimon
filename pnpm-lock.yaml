@@ -34,6 +34,9 @@ importers:
       '@deepseek-ai/dsh-browser-use':
         specifier: workspace:*
         version: link:packages/browser-use/browser-use
+      '@deepseek-ai/dsh-client-ui-paimon-tasks':
+        specifier: link:../paimon-src/packages/ui-paimon-tasks
+        version: link:../paimon-src/packages/ui-paimon-tasks
       '@deepseek-ai/dsh-computer-use':
         specifier: workspace:*
         version: link:packages/computer-use/computer-use
@@ -94,6 +97,18 @@ importers:
       '@deepseek-ai/dsh-mcp-client':
         specifier: workspace:*
         version: link:packages/mcp/mcp-client
+      '@deepseek-ai/dsh-paimon-controller':
+        specifier: link:../paimon-src/packages/paimon-controller
+        version: link:../paimon-src/packages/paimon-controller
+      '@deepseek-ai/dsh-paimon-task-harness':
+        specifier: link:../paimon-src/packages/task-runtime-harness
+        version: link:../paimon-src/packages/task-runtime-harness
+      '@deepseek-ai/dsh-paimon-task-runtime':
+        specifier: link:../paimon-src/packages/task-runtime
+        version: link:../paimon-src/packages/task-runtime
+      '@deepseek-ai/dsh-paimon-task-store-file':
+        specifier: link:../paimon-src/packages/task-store-file
+        version: link:../paimon-src/packages/task-store-file
       '@deepseek-ai/dsh-skill-office':
         specifier: workspace:*
         version: link:packages/skill/skill-office
@@ -106,6 +121,9 @@ importers:
       '@deepseek-ai/dsh-tool-executor-ptc':
         specifier: workspace:*
         version: link:packages/core/tool-executor-ptc
+      '@deepseek-ai/dsh-tool-paimon-task':
+        specifier: link:../paimon-src/packages/tool-paimon-task
+        version: link:../paimon-src/packages/tool-paimon-task
       '@deepseek-ai/dsh-tool-ralph':
         specifier: workspace:*
         version: link:packages/experimental/tool-ralph
@@ -1526,9 +1544,6 @@ importers:
       '@deepseek-ai/dsh-office-to-pdf':
         specifier: workspace:*
         version: link:../../document/office-to-pdf
-      '@deepseek-ai/dsh-paimon-controller':
-        specifier: workspace:*
-        version: link:../../paimon/paimon-controller
       '@deepseek-ai/dsh-permission-presets':
         specifier: workspace:*
         version: link:../../interaction/permission-presets
@@ -3012,9 +3027,6 @@ importers:
       '@deepseek-ai/dsh-client-ui-open-in-app':
         specifier: workspace:*
         version: link:../../client/ui-open-in-app
-      '@deepseek-ai/dsh-client-ui-paimon-tasks':
-        specifier: workspace:*
-        version: link:../../client/ui-paimon-tasks
       '@deepseek-ai/dsh-client-ui-permission-presets':
         specifier: workspace:*
         version: link:../../client/ui-permission-presets
@@ -4822,48 +4834,6 @@ importers:
       react:
         specifier: ^18.2.0
         version: 18.3.1
-
-  packages/client/ui-paimon-tasks:
-    devDependencies:
-      '@deepseek-ai/cordis':
-        specifier: workspace:~
-        version: link:../../../vendor/cordis
-      '@deepseek-ai/dsh-api-remotes':
-        specifier: workspace:*
-        version: link:../../api/remotes
-      '@deepseek-ai/dsh-client-locale':
-        specifier: workspace:*
-        version: link:../locale
-      '@deepseek-ai/dsh-client-test-runtime':
-        specifier: workspace:*
-        version: link:../../test-support/client-runtime
-      '@deepseek-ai/dsh-client-ui-conversation':
-        specifier: workspace:*
-        version: link:../ui-conversation
-      '@deepseek-ai/dsh-client-ui-primitives':
-        specifier: workspace:*
-        version: link:../ui-primitives
-      '@deepseek-ai/dsh-client-ui-renderer':
-        specifier: workspace:*
-        version: link:../ui-renderer
-      '@deepseek-ai/dsh-client-ui-slots':
-        specifier: workspace:*
-        version: link:../ui-slots
-      '@deepseek-ai/dsh-paimon-controller':
-        specifier: workspace:*
-        version: link:../../paimon/paimon-controller
-      '@deepseek-ai/dsh-typert-protocol':
-        specifier: workspace:*
-        version: link:../../typert/protocol
-      '@testing-library/react':
-        specifier: ^16.3.3
-        version: 16.3.3(@testing-library/dom@10.4.2)(@types/react-dom@18.3.7(@types/react@18.3.31))(@types/react@18.3.31)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
-      react:
-        specifier: ^18.2.0
-        version: 18.3.1
-      react-dom:
-        specifier: ^18.2.0
-        version: 18.3.1(react@18.3.1)
 
   packages/client/ui-permission-presets:
     devDependencies:
@@ -12877,100 +12847,6 @@ importers:
       '@deepseek-ai/dsh-tool-testkit':
         specifier: workspace:*
         version: link:../../test-support/tool-testkit
-      '@deepseek-ai/dsh-tools':
-        specifier: workspace:*
-        version: link:../../core/tools
-
-  packages/paimon/paimon-controller:
-    dependencies:
-      '@deepseek-ai/dsh-paimon-task-runtime':
-        specifier: workspace:*
-        version: link:../task-runtime
-    devDependencies:
-      '@deepseek-ai/cordis':
-        specifier: workspace:~
-        version: link:../../../vendor/cordis
-      '@deepseek-ai/dsh-paimon-task-harness':
-        specifier: workspace:*
-        version: link:../task-runtime-harness
-      '@deepseek-ai/dsh-typert-protocol':
-        specifier: workspace:*
-        version: link:../../typert/protocol
-
-  packages/paimon/task-runtime:
-    devDependencies:
-      '@deepseek-ai/cordis':
-        specifier: workspace:~
-        version: link:../../../vendor/cordis
-
-  packages/paimon/task-runtime-harness:
-    dependencies:
-      '@deepseek-ai/dsh-home-paths':
-        specifier: workspace:*
-        version: link:../../util/home-paths
-      '@deepseek-ai/dsh-paimon-task-runtime':
-        specifier: workspace:*
-        version: link:../task-runtime
-      '@deepseek-ai/dsh-paimon-task-store-file':
-        specifier: workspace:*
-        version: link:../task-store-file
-      '@deepseek-ai/schemastery':
-        specifier: link:../../../vendor/schemastery
-        version: link:../../../vendor/schemastery
-    devDependencies:
-      '@deepseek-ai/cordis':
-        specifier: workspace:~
-        version: link:../../../vendor/cordis
-      '@deepseek-ai/dsh-agent':
-        specifier: workspace:*
-        version: link:../../core/agent
-      '@deepseek-ai/dsh-llm':
-        specifier: workspace:*
-        version: link:../../llm/llm
-      '@deepseek-ai/dsh-session':
-        specifier: workspace:*
-        version: link:../../core/session
-      '@deepseek-ai/dsh-session-projection':
-        specifier: workspace:*
-        version: link:../../session/session-projection
-      '@deepseek-ai/dsh-system-prompt':
-        specifier: workspace:*
-        version: link:../../core/system-prompt
-      '@deepseek-ai/dsh-tool-executor-native':
-        specifier: workspace:*
-        version: link:../../core/tool-executor-native
-      '@deepseek-ai/dsh-tool-testkit':
-        specifier: workspace:*
-        version: link:../../test-support/tool-testkit
-      '@deepseek-ai/dsh-tools':
-        specifier: workspace:*
-        version: link:../../core/tools
-      '@deepseek-ai/dsh-user-approval':
-        specifier: workspace:*
-        version: link:../../interaction/user-approval
-
-  packages/paimon/task-store-file:
-    dependencies:
-      '@deepseek-ai/dsh-paimon-task-runtime':
-        specifier: workspace:*
-        version: link:../task-runtime
-    devDependencies:
-      '@deepseek-ai/cordis':
-        specifier: workspace:~
-        version: link:../../../vendor/cordis
-
-  packages/paimon/tool-paimon-task:
-    dependencies:
-      '@deepseek-ai/dsh-paimon-task-harness':
-        specifier: workspace:*
-        version: link:../task-runtime-harness
-      '@deepseek-ai/dsh-paimon-task-runtime':
-        specifier: workspace:*
-        version: link:../task-runtime
-    devDependencies:
-      '@deepseek-ai/cordis':
-        specifier: workspace:~
-        version: link:../../../vendor/cordis
       '@deepseek-ai/dsh-tools':
         specifier: workspace:*
         version: link:../../core/tools
